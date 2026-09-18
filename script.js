@@ -12,6 +12,7 @@ const APPS_SCRIPT_URL =
 // de este arreglo y lo volvemos a filtrar — nunca volvemos a pedirle
 // los datos a Google a menos que el usuario le dé "Actualizar".
 let registrosOriginales = [];
+let esPrimeraCarga = true; // solo queremos fijar "último día" al abrir la página, no cada Actualizar
 
 // ============================================================
 // 2. REFERENCIAS A ELEMENTOS DEL DOM
@@ -25,7 +26,9 @@ const el = {
   fechaHasta: document.getElementById("fecha-hasta"),
   filtroLote: document.getElementById("filtro-lote"),
   btnRefrescar: document.getElementById("btn-refrescar"),
-  buscador: document.getElementById("buscador"),
+  buscadorImei: document.getElementById("buscador-imei"),
+  panelBusquedaImei: document.getElementById("panel-busqueda-imei"),
+  resultadoImei: document.getElementById("resultado-imei"),
 
   statTotal: document.getElementById("stat-total"),
   statBaterias: document.getElementById("stat-baterias"),
@@ -37,8 +40,6 @@ const el = {
 
   tablaModelos: document.querySelector("#tabla-modelos tbody"),
   tablaPulido: document.querySelector("#tabla-pulido tbody"),
-  tablaRegistros: document.querySelector("#tabla-registros tbody"),
-  tableFootnote: document.getElementById("table-footnote"),
 
   ultimaActualizacion: document.getElementById("ultima-actualizacion"),
 };
@@ -113,6 +114,7 @@ async function cargarDatos() {
 // vez que filtramos o dibujamos la tabla.
 function normalizarRegistro(fila) {
   return {
+    raw: fila, // guardamos la fila completa, tal cual vino, para el detalle de búsqueda
     fechaIngreso: fila["FECHA"] ? new Date(fila["FECHA"]) : null,
     // Estas tres son las que de verdad importan para filtrar por rango:
     // cada actividad del taller quedó registrada en su propia columna.
@@ -121,7 +123,8 @@ function normalizarRegistro(fila) {
     fechaChequeo: fila["FECHA DE CHEQUEO"] ? new Date(fila["FECHA DE CHEQUEO"]) : null,
     modelo: fila["MODELO"] || "",
     capacidad: fila["CAPACIDAD"] || "",
-    imei: fila["IMEI"] || "",
+    imei: String(fila["IMEI"] || ""),
+    imei2: String(fila["imei 2"] || ""),
     bateriaPct: fila["% BATERIA"] != null ? Number(fila["% BATERIA"]) : null,
     grado: fila["GRADO"] || "",
     color: fila["COLOR"] || "",
@@ -156,6 +159,15 @@ function mostrarRangoDeFechasDisponible(registros) {
   el.fechaDesde.max = maxClave;
   el.fechaHasta.min = minClave;
   el.fechaHasta.max = maxClave;
+
+  // Al abrir la página por primera vez, mostramos solo el último día
+  // con actividad (no todo el historial). Si el usuario ya eligió
+  // sus propias fechas y le da "Actualizar", no se las pisamos.
+  if (esPrimeraCarga) {
+    el.fechaDesde.value = maxClave;
+    el.fechaHasta.value = maxClave;
+    esPrimeraCarga = false;
+  }
 
   el.rangoFechas.textContent =
     `Actividad registrada del ${minFecha.toLocaleDateString("es-PE", { timeZone: "UTC" })} ` +
@@ -198,26 +210,11 @@ function obtenerClaveFecha(fecha) {
   return `${anio}-${mes}-${dia}`;
 }
 
-// Filtros que aplican igual para todas las secciones: lote y texto
-// de búsqueda. La fecha NO se aplica aquí porque cada sección usa
-// una columna de fecha distinta (ver más abajo).
+// Filtro común para todas las secciones del panel (menos el buscador
+// de IMEI, que ignora todo esto a propósito — ver sección 6).
 function aplicarFiltrosComunes(registros) {
   const lote = el.filtroLote.value;
-  const busqueda = el.buscador.value.trim().toLowerCase();
-
-  return registros.filter((r) => {
-    if (lote && r.lote !== lote) return false;
-
-    if (busqueda) {
-      const textoCombinado = [
-        r.modelo, r.imei, r.color, r.grado,
-        r.tecnicoBateria, r.tecnicoChequeo, r.pulidor, r.lote,
-      ].join(" ").toLowerCase();
-      if (!textoCombinado.includes(busqueda)) return false;
-    }
-
-    return true;
-  });
+  return registros.filter((r) => !lote || r.lote === lote);
 }
 
 // true si `fecha` cae dentro de [desde, hasta]. Si desde/hasta están
@@ -324,7 +321,6 @@ function aplicarFiltrosYRenderizar() {
   renderizarRanking(el.rankingChequeo, contarPorCampo(registrosChequeo, "tecnicoChequeo"));
   renderizarTablaModelos(contarModelos(registrosConActividad));
   renderizarTablaPulido(contarPulidoPorLote(registrosPulido));
-  renderizarTablaRegistros(registrosConActividad);
 }
 
 function renderizarHero({ total, baterias, chequeos, pulidos }) {
@@ -386,33 +382,94 @@ function renderizarTablaPulido(filas) {
     .join("");
 }
 
-const LIMITE_TABLA_REGISTROS = 200;
+// ============================================================
+// 6. BÚSQUEDA POR IMEI (independiente de fecha y lote)
+// ============================================================
+// El usuario pidió que esto busque en TODA la información sin
+// importar los filtros de fecha o lote — por eso usa siempre
+// `registrosOriginales` directamente, nunca el resultado de
+// aplicarFiltrosComunes().
+const ETIQUETAS_DETALLE_IMEI = [
+  ["MODELO", "Modelo", "texto"],
+  ["CAPACIDAD", "Capacidad", "texto"],
+  ["IMEI", "IMEI", "texto"],
+  ["imei 2", "IMEI 2", "texto"],
+  ["% BATERIA", "% Batería", "porcentaje"],
+  ["CICLOS", "Ciclos", "texto"],
+  ["GRADO", "Grado", "texto"],
+  ["COLOR", "Color", "texto"],
+  ["N° MODELO", "N° modelo", "texto"],
+  ["LOTE", "Lote", "texto"],
+  ["FECHA", "Fecha de ingreso", "fecha"],
+  ["PULIDOR", "Pulidor", "texto"],
+  ["FECHA DE PULIDO", "Fecha de pulido", "fecha"],
+  ["PULIDO", "Pulido", "texto"],
+  ["HABILITADOR", "Habilitador", "texto"],
+  ["FECHA CAMBIO BATERIA", "Fecha cambio de batería", "fecha"],
+  ["BATERIA", "Técnico batería", "texto"],
+  ["FECHA DE CHEQUEO", "Fecha de chequeo", "fecha"],
+  ["CHEQUEO", "Técnico chequeo", "texto"],
+  ["MANCHA DE CAMARA", "Mancha de cámara", "texto"],
+  ["FALLA", "Falla", "texto"],
+  ["MENSAJE", "Mensaje", "texto"],
+  ["OBSERVACIONES", "Observaciones", "texto"],
+  ["PIEZA CAMBIADA (ORIGINAL)", "Pieza cambiada (original)", "texto"],
+  ["GRADO ORIGEN", "Grado origen", "texto"],
+];
 
-function renderizarTablaRegistros(registros) {
-  const mostrar = registros.slice(0, LIMITE_TABLA_REGISTROS);
+function formatearValorDetalle(valor, tipo) {
+  if (valor === null || valor === undefined || valor === "") return "—";
 
-  el.tablaRegistros.innerHTML = mostrar
-    .map((r) => {
-      const claseBadge = r.pulido === "SI" ? "badge-si" : "badge-no";
-      return `
-      <tr>
-        <td>${escaparHtml(r.modelo)}</td>
-        <td>${escaparHtml(r.imei)}</td>
-        <td>${formatearFecha(r.fechaPulido)}</td>
-        <td class="${claseBadge}">${escaparHtml(r.pulido || "—")}</td>
-        <td>${formatearFecha(r.fechaBateria)}</td>
-        <td>${escaparHtml(r.tecnicoBateria || "—")}</td>
-        <td>${formatearFecha(r.fechaChequeo)}</td>
-        <td>${escaparHtml(r.tecnicoChequeo || "—")}</td>
-        <td>${escaparHtml(r.lote)}</td>
-      </tr>`;
-    })
-    .join("");
+  if (tipo === "fecha") {
+    const fecha = new Date(valor);
+    if (isNaN(fecha)) return "—";
+    return fecha.toLocaleDateString("es-PE", { timeZone: "UTC" });
+  }
 
-  el.tableFootnote.textContent =
-    registros.length > LIMITE_TABLA_REGISTROS
-      ? `Mostrando ${LIMITE_TABLA_REGISTROS} de ${registros.length} registros. Usa el buscador o los filtros para acotar.`
-      : `${registros.length} registro(s) encontrado(s).`;
+  if (tipo === "porcentaje") {
+    const numero = Number(valor);
+    return isNaN(numero) ? "—" : Math.round(numero * 100) + "%";
+  }
+
+  return String(valor);
+}
+
+function renderizarDetalleImei(registro) {
+  const campos = ETIQUETAS_DETALLE_IMEI.map(([clave, etiqueta, tipo]) => {
+    const valor = formatearValorDetalle(registro.raw[clave], tipo);
+    return `
+      <div class="imei-field">
+        <span class="imei-field-label">${escaparHtml(etiqueta)}</span>
+        <span class="imei-field-value">${escaparHtml(valor)}</span>
+      </div>`;
+  }).join("");
+
+  return `<div class="imei-result-block"><div class="imei-detail">${campos}</div></div>`;
+}
+
+function buscarPorImei() {
+  const texto = el.buscadorImei.value.trim();
+
+  if (!texto) {
+    el.panelBusquedaImei.hidden = true;
+    el.resultadoImei.innerHTML = "";
+    return;
+  }
+
+  const busquedaLimpia = texto.replace(/\s+/g, "");
+  const coincidencias = registrosOriginales.filter(
+    (r) => r.imei.includes(busquedaLimpia) || r.imei2.includes(busquedaLimpia)
+  );
+
+  el.panelBusquedaImei.hidden = false;
+
+  if (coincidencias.length === 0) {
+    el.resultadoImei.innerHTML =
+      '<p class="imei-not-found">No se encontró ningún equipo con ese IMEI.</p>';
+    return;
+  }
+
+  el.resultadoImei.innerHTML = coincidencias.map(renderizarDetalleImei).join("");
 }
 
 // ============================================================
@@ -438,7 +495,7 @@ el.btnRefrescar.addEventListener("click", cargarDatos);
 el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
 el.fechaHasta.addEventListener("change", aplicarFiltrosYRenderizar);
 el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
-el.buscador.addEventListener("input", aplicarFiltrosYRenderizar);
+el.buscadorImei.addEventListener("input", buscarPorImei);
 
 // ============================================================
 // 9. ARRANQUE

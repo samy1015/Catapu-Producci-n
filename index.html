@@ -11,126 +11,134 @@
 </head>
 <body>
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">CATAPU</span>
-      <h1 class="brand-title">Producción diaria</h1>
+  <div class="app-shell">
+
+    <!-- ============ BARRA LATERAL ============ -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <img src="assets/logo.jpg" alt="Catapu" class="sidebar-logo" />
+        <span class="sidebar-brand-name">CATAPU</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-link nav-link--active">Producción</a>
+        <a href="#" class="nav-link nav-link--disabled" title="Próximamente">Reparación</a>
+        <a href="#" class="nav-link nav-link--disabled" title="Próximamente">Garantías</a>
+      </nav>
+    </aside>
+
+    <!-- ============ CONTENIDO PRINCIPAL ============ -->
+    <div class="main-area">
+
+      <header class="topbar">
+        <h1 class="page-title">Producción</h1>
+
+        <div class="controls">
+          <label class="control control--search">
+            <span class="control-label">Buscar IMEI</span>
+            <input type="search" id="buscador-imei" placeholder="Buscar por IMEI…" class="search-box" inputmode="numeric" />
+          </label>
+          <label class="control">
+            <span class="control-label">Desde</span>
+            <input type="date" id="fecha-desde" />
+          </label>
+          <label class="control">
+            <span class="control-label">Hasta</span>
+            <input type="date" id="fecha-hasta" />
+          </label>
+          <label class="control">
+            <span class="control-label">Lote</span>
+            <select id="filtro-lote">
+              <option value="">Todos</option>
+            </select>
+          </label>
+          <button id="btn-refrescar" class="btn-refresh" title="Volver a cargar datos">
+            <span class="refresh-icon">↻</span> Actualizar
+          </button>
+        </div>
+      </header>
+
+      <p class="status-line" id="status-line">Cargando datos…</p>
+      <p class="status-line" id="rango-fechas"></p>
+      <p class="status-line" id="nota-filtros">
+        El rango de fechas se aplica por separado a cada actividad: pulido, cambio de batería y chequeo usan su propia columna de fecha.
+      </p>
+
+      <main>
+
+        <!-- Resultado de búsqueda por IMEI (oculto si no hay búsqueda) -->
+        <section class="panel panel-wide" id="panel-busqueda-imei" hidden>
+          <h2 class="panel-title">Resultado de búsqueda — IMEI</h2>
+          <div id="resultado-imei"></div>
+        </section>
+
+        <!-- Franja de métricas grandes -->
+        <section class="hero-strip" id="hero-strip" aria-label="Resumen general">
+          <div class="hero-stat">
+            <span class="hero-number" id="stat-total">—</span>
+            <span class="hero-label">Total de equipos trabajados</span>
+          </div>
+          <div class="hero-stat hero-stat--good">
+            <span class="hero-number" id="stat-baterias">—</span>
+            <span class="hero-label">Baterías cambiadas</span>
+          </div>
+          <div class="hero-stat hero-stat--warn">
+            <span class="hero-number" id="stat-chequeos">—</span>
+            <span class="hero-label">Chequeos</span>
+          </div>
+          <div class="hero-stat hero-stat--accent">
+            <span class="hero-number" id="stat-pulidos">—</span>
+            <span class="hero-label">Equipos pulidos</span>
+          </div>
+        </section>
+
+        <!-- Rankings + tablas -->
+        <section class="grid-main">
+
+          <div class="col-left">
+            <div class="panel">
+              <h2 class="panel-title">Cambios de batería por técnico</h2>
+              <div class="ranking" id="ranking-bateria"></div>
+            </div>
+
+            <div class="panel">
+              <h2 class="panel-title">Chequeos por técnico</h2>
+              <div class="ranking" id="ranking-chequeo"></div>
+            </div>
+          </div>
+
+          <div class="col-right">
+            <div class="panel">
+              <h2 class="panel-title">Modelos en el rango</h2>
+              <table class="data-table" id="tabla-modelos">
+                <thead>
+                  <tr><th>Modelo</th><th>Capacidad</th><th>Cantidad</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h2 class="panel-title">Pulido por lote</h2>
+              <table class="data-table" id="tabla-pulido">
+                <thead>
+                  <tr><th>Lote</th><th>Pulidor</th><th>Pulidos</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+        </section>
+
+      </main>
+
+      <footer class="footer">
+        <span id="ultima-actualizacion"></span>
+      </footer>
+
     </div>
-
-    <div class="controls">
-      <label class="control">
-        <span class="control-label">Desde</span>
-        <input type="date" id="fecha-desde" />
-      </label>
-      <label class="control">
-        <span class="control-label">Hasta</span>
-        <input type="date" id="fecha-hasta" />
-      </label>
-      <label class="control">
-        <span class="control-label">Lote</span>
-        <select id="filtro-lote">
-          <option value="">Todos</option>
-        </select>
-      </label>
-      <button id="btn-refrescar" class="btn-refresh" title="Volver a cargar datos">
-        <span class="refresh-icon">↻</span> Actualizar
-      </button>
-    </div>
-  </header>
-
-  <p class="status-line" id="status-line">Cargando datos…</p>
-  <p class="status-line" id="rango-fechas"></p>
-  <p class="status-line" id="nota-filtros">
-    El rango de fechas se aplica por separado a cada actividad: pulido, cambio de batería y chequeo usan su propia columna de fecha.
-  </p>
-
-  <main>
-    <!-- Franja de métricas grandes -->
-    <section class="hero-strip" id="hero-strip" aria-label="Resumen general">
-      <div class="hero-stat">
-        <span class="hero-number" id="stat-total">—</span>
-        <span class="hero-label">Equipos con actividad en el rango</span>
-      </div>
-      <div class="hero-stat hero-stat--good">
-        <span class="hero-number" id="stat-baterias">—</span>
-        <span class="hero-label">Baterías cambiadas</span>
-      </div>
-      <div class="hero-stat hero-stat--warn">
-        <span class="hero-number" id="stat-chequeos">—</span>
-        <span class="hero-label">Chequeos realizados</span>
-      </div>
-      <div class="hero-stat hero-stat--accent">
-        <span class="hero-number" id="stat-pulidos">—</span>
-        <span class="hero-label">Pulidos completados</span>
-      </div>
-    </section>
-
-    <!-- Rankings + tablas -->
-    <section class="grid-main">
-
-      <div class="col-left">
-        <div class="panel">
-          <h2 class="panel-title">Cambios de batería por técnico</h2>
-          <div class="ranking" id="ranking-bateria"></div>
-        </div>
-
-        <div class="panel">
-          <h2 class="panel-title">Chequeos por técnico</h2>
-          <div class="ranking" id="ranking-chequeo"></div>
-        </div>
-      </div>
-
-      <div class="col-right">
-        <div class="panel">
-          <h2 class="panel-title">Modelos en el rango</h2>
-          <table class="data-table" id="tabla-modelos">
-            <thead>
-              <tr><th>Modelo</th><th>Capacidad</th><th>Cantidad</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-
-        <div class="panel">
-          <h2 class="panel-title">Pulido por lote</h2>
-          <table class="data-table" id="tabla-pulido">
-            <thead>
-              <tr><th>Lote</th><th>Pulidor</th><th>Pulidos</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-
-    </section>
-
-    <!-- Buscador de equipos -->
-    <section class="panel panel-wide">
-      <div class="panel-header-row">
-        <h2 class="panel-title">Buscar equipo</h2>
-        <input type="search" id="buscador" placeholder="Buscar por IMEI, modelo, color, técnico…" class="search-box" />
-      </div>
-      <div class="table-scroll">
-        <table class="data-table data-table--dense" id="tabla-registros">
-          <thead>
-            <tr>
-              <th>Modelo</th><th>IMEI</th>
-              <th>F. Pulido</th><th>Pulido</th>
-              <th>F. Batería</th><th>Técnico batería</th>
-              <th>F. Chequeo</th><th>Técnico chequeo</th>
-              <th>Lote</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <p class="table-footnote" id="table-footnote"></p>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <span id="ultima-actualizacion"></span>
-  </footer>
+  </div>
 
   <script src="script.js"></script>
 </body>

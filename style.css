@@ -37,6 +37,88 @@ h1, h2 {
 }
 
 /* ============================================
+   ESTRUCTURA GENERAL (sidebar + contenido)
+   ============================================ */
+.app-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.main-area {
+  min-width: 0; /* evita que el contenido empuje el ancho de la página */
+}
+
+/* ============================================
+   BARRA LATERAL
+   ============================================ */
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.sidebar-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebar-logo {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.sidebar-brand-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nav-link {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 3px;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.nav-link--active {
+  background: var(--panel-alt);
+  color: var(--accent);
+  border-color: var(--line);
+}
+
+.nav-link--disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ============================================
    BARRA SUPERIOR
    ============================================ */
 .topbar {
@@ -49,21 +131,7 @@ h1, h2 {
   border-bottom: 1px solid var(--line);
 }
 
-.brand {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-}
-
-.brand-mark {
-  font-family: var(--font-display);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-  font-size: 15px;
-}
-
-.brand-title {
+.page-title {
   font-size: 22px;
   font-weight: 600;
 }
@@ -79,6 +147,10 @@ h1, h2 {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.control--search .search-box {
+  min-width: 180px;
 }
 
 .control-label {
@@ -141,6 +213,42 @@ input[type="date"]:focus, select:focus, .search-box:focus {
 
 .status-line.is-error {
   color: var(--bad);
+}
+
+/* ============================================
+   RESULTADO DE BÚSQUEDA POR IMEI
+   ============================================ */
+.imei-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px 24px;
+}
+
+.imei-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.imei-field-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+}
+
+.imei-field-value {
+  font-size: 13.5px;
+}
+
+.imei-not-found {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.imei-result-block + .imei-result-block {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
 }
 
 /* ============================================
@@ -362,6 +470,27 @@ main {
    RESPONSIVE
    ============================================ */
 @media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 14px 18px;
+  }
+  .sidebar-brand {
+    flex-direction: row;
+  }
+  .sidebar-logo {
+    width: 36px;
+    height: 36px;
+  }
+  .sidebar-nav {
+    flex-direction: row;
+  }
   .grid-main {
     grid-template-columns: 1fr;
   }
