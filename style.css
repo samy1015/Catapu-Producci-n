@@ -69,10 +69,10 @@ h1, h2 {
 }
 
 .sidebar-logo {
-  width: 64px;
-  height: 64px;
+  width: 110px;
+  height: 110px;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 .sidebar-brand-name {
