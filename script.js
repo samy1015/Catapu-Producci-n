@@ -39,7 +39,6 @@ const el = {
   rankingChequeo: document.getElementById("ranking-chequeo"),
 
   tablaModelos: document.querySelector("#tabla-modelos tbody"),
-  tablaPulido: document.querySelector("#tabla-pulido tbody"),
 
   ultimaActualizacion: document.getElementById("ultima-actualizacion"),
 };
@@ -265,22 +264,6 @@ function contarModelos(registros) {
     .sort((a, b) => b.cantidad - a.cantidad);
 }
 
-function contarPulidoPorLote(registros) {
-  const conteo = new Map();
-  registros
-    .filter((r) => r.pulido === "SI")
-    .forEach((r) => {
-      const clave = `${r.lote}||${r.pulidor || "Sin asignar"}`;
-      conteo.set(clave, (conteo.get(clave) || 0) + 1);
-    });
-  return [...conteo.entries()]
-    .map(([clave, cantidad]) => {
-      const [lote, pulidor] = clave.split("||");
-      return { lote, pulidor, cantidad };
-    })
-    .sort((a, b) => b.cantidad - a.cantidad);
-}
-
 // ============================================================
 // 6. RENDERIZADO
 // ============================================================
@@ -299,10 +282,9 @@ function aplicarFiltrosYRenderizar() {
     (r) => r.tecnicoChequeo && fechaDentroDeRango(r.fechaChequeo, desde, hasta)
   );
 
-  // Para "modelos" y para la tabla de búsqueda, consideramos que un
-  // equipo "tuvo actividad en el rango" si CUALQUIERA de sus tres
-  // fechas cae dentro de lo seleccionado. Si no hay rango elegido,
-  // esto simplemente devuelve todos los registros (base).
+  // Para "modelos" consideramos que un equipo "tuvo actividad en el
+  // rango" si CUALQUIERA de sus tres fechas cae dentro de lo
+  // seleccionado. Si no hay rango elegido, devuelve todos (base).
   const registrosConActividad = base.filter(
     (r) =>
       fechaDentroDeRango(r.fechaPulido, desde, hasta) ||
@@ -320,7 +302,6 @@ function aplicarFiltrosYRenderizar() {
   renderizarRanking(el.rankingBateria, contarPorCampo(registrosBateria, "tecnicoBateria"));
   renderizarRanking(el.rankingChequeo, contarPorCampo(registrosChequeo, "tecnicoChequeo"));
   renderizarTablaModelos(contarModelos(registrosConActividad));
-  renderizarTablaPulido(contarPulidoPorLote(registrosPulido));
 }
 
 function renderizarHero({ total, baterias, chequeos, pulidos }) {
@@ -363,19 +344,6 @@ function renderizarTablaModelos(filas) {
       <tr>
         <td>${escaparHtml(f.modelo)}</td>
         <td>${escaparHtml(f.capacidad)}</td>
-        <td>${f.cantidad}</td>
-      </tr>`
-    )
-    .join("");
-}
-
-function renderizarTablaPulido(filas) {
-  el.tablaPulido.innerHTML = filas
-    .map(
-      (f) => `
-      <tr>
-        <td>${escaparHtml(f.lote)}</td>
-        <td>${escaparHtml(f.pulidor)}</td>
         <td>${f.cantidad}</td>
       </tr>`
     )

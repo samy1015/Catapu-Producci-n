@@ -29,6 +29,7 @@ body {
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.5;
+  overflow-x: hidden; /* evita que algo se salga y genere scroll lateral de toda la página */
 }
 
 h1, h2 {
@@ -296,16 +297,10 @@ main {
    ============================================ */
 .grid-main {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 1fr 1fr 1.6fr;
   gap: 20px;
   align-items: start;
   margin-bottom: 20px;
-}
-
-.col-left, .col-right {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
 }
 
 .panel {
@@ -313,6 +308,7 @@ main {
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 18px 20px 20px;
+  overflow-x: auto; /* si una tabla no cabe en pantallas angostas, se desliza dentro del panel en vez de romper el layout */
 }
 
 .panel-title {
@@ -477,6 +473,8 @@ main {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 10px;
     border-right: none;
     border-bottom: 1px solid var(--line);
     padding: 14px 18px;
@@ -490,6 +488,7 @@ main {
   }
   .sidebar-nav {
     flex-direction: row;
+    flex-wrap: wrap;
   }
   .grid-main {
     grid-template-columns: 1fr;
@@ -500,12 +499,54 @@ main {
 }
 
 @media (max-width: 560px) {
-  .hero-strip {
-    grid-template-columns: 1fr;
-  }
   .topbar {
     flex-direction: column;
     align-items: stretch;
+    padding: 16px 16px;
+  }
+  main {
+    padding: 16px 16px 40px;
+  }
+  .status-line {
+    margin: 10px 16px 0;
+  }
+  .footer {
+    padding: 14px 16px 20px;
+  }
+
+  /* En columna, cada control (fecha, lote, buscador) ocupa todo el
+     ancho disponible en vez de quedar angosto y apretado. */
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .control--search .search-box,
+  input[type="date"],
+  select {
+    width: 100%;
+  }
+
+  .hero-strip {
+    grid-template-columns: 1fr;
+  }
+  .hero-number {
+    font-size: 32px;
+  }
+
+  .panel {
+    padding: 14px 16px 16px;
+  }
+
+  /* La columna del nombre del técnico se angosta un poco para que
+     la barra y el número sigan cabiendo cómodos. */
+  .ranking-row {
+    grid-template-columns: 80px 1fr 32px;
+    gap: 8px;
+  }
+
+  .imei-detail {
+    grid-template-columns: 1fr;
   }
 }
 
