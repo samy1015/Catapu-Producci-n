@@ -16,19 +16,21 @@
     <!-- ============ BARRA LATERAL ============ -->
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <img src="assets/logo.jpg" alt="Catapu" class="sidebar-logo" />
-        <span class="sidebar-brand-name">CATAPU</span>
+        <img src="assets/logo-wordmark.png" alt="Catapu" class="sidebar-logo" />
       </div>
 
       <nav class="sidebar-nav">
-        <a href="#" class="nav-link nav-link--active">Producción</a>
-        <a href="#" class="nav-link nav-link--disabled" title="Próximamente">Reparación</a>
-        <a href="#" class="nav-link nav-link--disabled" title="Próximamente">Garantías</a>
+        <a href="#produccion" class="nav-link nav-link--active" data-vista="produccion">Producción</a>
+        <a href="#reparacion" class="nav-link" data-vista="reparacion">Reparación</a>
+        <a href="#" class="nav-link nav-link--disabled" title="Próximamente" aria-disabled="true" tabindex="-1">Garantías</a>
       </nav>
     </aside>
 
     <!-- ============ CONTENIDO PRINCIPAL ============ -->
     <div class="main-area">
+
+    <!-- ---------- Vista: Producción ---------- -->
+    <div class="vista" id="vista-produccion">
 
       <header class="topbar">
         <h1 class="page-title">Producción</h1>
@@ -60,6 +62,9 @@
 
       <p class="status-line" id="status-line">Cargando datos…</p>
       <p class="status-line" id="rango-fechas"></p>
+      <p class="status-line is-error" id="aviso-rango" role="alert" hidden>
+        La fecha "Desde" es posterior a "Hasta". Corrige el rango para ver resultados.
+      </p>
       <p class="status-line" id="nota-filtros">
         El rango de fechas se aplica por separado a cada actividad: pulido, cambio de batería y chequeo usan su propia columna de fecha.
       </p>
@@ -121,9 +126,92 @@
         <span id="ultima-actualizacion"></span>
       </footer>
 
+    </div><!-- /vista-produccion -->
+
+    <!-- ---------- Vista: Reparación ---------- -->
+    <div class="vista" id="vista-reparacion" hidden>
+
+      <header class="topbar">
+        <h1 class="page-title">Reparación</h1>
+
+        <div class="controls">
+          <label class="control">
+            <span class="control-label">Desde</span>
+            <input type="date" id="rep-fecha-desde" />
+          </label>
+          <label class="control">
+            <span class="control-label">Hasta</span>
+            <input type="date" id="rep-fecha-hasta" />
+          </label>
+          <label class="control">
+            <span class="control-label">Técnico</span>
+            <select id="rep-filtro-tecnico">
+              <option value="">Todos</option>
+            </select>
+          </label>
+          <button id="rep-btn-refrescar" class="btn-refresh" title="Volver a cargar datos">
+            <span class="refresh-icon">↻</span> Actualizar
+          </button>
+        </div>
+      </header>
+
+      <p class="status-line" id="rep-status-line" aria-live="polite">Cargando datos…</p>
+      <p class="status-line" id="rep-rango-fechas"></p>
+      <p class="status-line is-error" id="rep-aviso-rango" role="alert" hidden>
+        La fecha "Desde" es posterior a "Hasta". Corrige el rango para ver resultados.
+      </p>
+
+      <main>
+        <section class="hero-strip" aria-label="Resumen de reparaciones">
+          <div class="hero-stat hero-stat--accent">
+            <span class="hero-number" id="rep-stat-total">—</span>
+            <span class="hero-label">Fallas reparadas</span>
+          </div>
+          <div class="hero-stat">
+            <span class="hero-number" id="rep-stat-tecnicos">—</span>
+            <span class="hero-label">Técnicos con reparaciones</span>
+          </div>
+          <div class="hero-stat hero-stat--good">
+            <span class="hero-number" id="rep-stat-promedio">—</span>
+            <span class="hero-label">Promedio por técnico</span>
+          </div>
+          <div class="hero-stat hero-stat--warn">
+            <span class="hero-number" id="rep-stat-fallas">—</span>
+            <span class="hero-label">Tipos de falla distintos</span>
+          </div>
+        </section>
+
+        <section class="grid-rep">
+          <div class="panel">
+            <h2 class="panel-title">Conteo por técnico</h2>
+            <div class="ranking" id="rep-ranking"></div>
+          </div>
+
+          <div class="panel">
+            <h2 class="panel-title">Avance por técnico</h2>
+            <div id="rep-dona"></div>
+          </div>
+        </section>
+
+        <section class="panel panel-wide">
+          <h2 class="panel-title">Total de reparaciones — técnico, modelo y falla</h2>
+          <table class="data-table matriz" id="rep-matriz">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span id="rep-ultima-actualizacion"></span>
+      </footer>
+
+    </div><!-- /vista-reparacion -->
+
     </div>
   </div>
 
   <script src="script.js"></script>
+  <script src="reparacion.js"></script>
 </body>
 </html>

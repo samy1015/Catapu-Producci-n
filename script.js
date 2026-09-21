@@ -12,6 +12,7 @@ const APPS_SCRIPT_URL =
 // de este arreglo y lo volvemos a filtrar — nunca volvemos a pedirle
 // los datos a Google a menos que el usuario le dé "Actualizar".
 let registrosOriginales = [];
+let cargando = false;
 let esPrimeraCarga = true; // solo queremos fijar "último día" al abrir la página, no cada Actualizar
 
 // ============================================================
@@ -22,6 +23,7 @@ let esPrimeraCarga = true; // solo queremos fijar "último día" al abrir la pá
 const el = {
   statusLine: document.getElementById("status-line"),
   rangoFechas: document.getElementById("rango-fechas"),
+  avisoRango: document.getElementById("aviso-rango"),
   fechaDesde: document.getElementById("fecha-desde"),
   fechaHasta: document.getElementById("fecha-hasta"),
   filtroLote: document.getElementById("filtro-lote"),
@@ -53,24 +55,43 @@ const el = {
 // etiqueta <script>, que no está sujeta a esa restricción. El propio
 // Apps Script (ver el doGet actualizado) envuelve el JSON en una
 // llamada a la función que le indiquemos por la URL.
+let contadorCallbacks = 0;
+const TIMEOUT_CARGA_MS = 120000; // la hoja pesa ~5 MB y Apps Script tarda ~40 s en responder
+
 function cargarViaJSONP(url) {
   return new Promise((resolve, reject) => {
-    const nombreCallback = "catapuCallback_" + Date.now();
+    // Contador en vez de solo Date.now() para que dos cargas nunca
+    // compartan el mismo nombre de función.
+    const nombreCallback = `catapuCallback_${Date.now()}_${contadorCallbacks++}`;
+    const etiquetaScript = document.createElement("script");
 
-    // Esta función será invocada por el <script> que insertamos,
-    // con los datos ya listos como un objeto JavaScript real.
-    window[nombreCallback] = (datos) => {
-      resolve(datos);
+    // Quita el callback, el <script> y el temporizador, pase lo que pase.
+    const limpiar = () => {
+      clearTimeout(temporizador);
       delete window[nombreCallback];
       etiquetaScript.remove();
     };
 
-    const etiquetaScript = document.createElement("script");
-    etiquetaScript.src = `${url}?callback=${nombreCallback}`;
+    // Si Apps Script responde con una página de error (HTML) o algo
+    // que no es JS válido, onerror no siempre se dispara; el timeout
+    // evita que la carga quede colgada para siempre.
+    const temporizador = setTimeout(() => {
+      limpiar();
+      reject(new Error("El Apps Script no respondió a tiempo o no devolvió datos. Revisa que la implementación tenga acceso para 'Cualquier usuario'."));
+    }, TIMEOUT_CARGA_MS);
+
+    // Esta función será invocada por el <script> que insertamos,
+    // con los datos ya listos como un objeto JavaScript real.
+    window[nombreCallback] = (datos) => {
+      limpiar();
+      resolve(datos);
+    };
+
+    const separador = url.includes("?") ? "&" : "?";
+    etiquetaScript.src = `${url}${separador}callback=${nombreCallback}`;
     etiquetaScript.onerror = () => {
+      limpiar();
       reject(new Error("No se pudo contactar al Apps Script (revisa la URL o que esté implementado como 'Cualquier usuario')."));
-      delete window[nombreCallback];
-      etiquetaScript.remove();
     };
 
     document.body.appendChild(etiquetaScript);
@@ -78,12 +99,17 @@ function cargarViaJSONP(url) {
 }
 
 async function cargarDatos() {
+  if (cargando) return; // ignora clics repetidos mientras hay una carga en curso
+  cargando = true;
   el.btnRefrescar.classList.add("is-loading");
   el.statusLine.textContent = "Cargando datos…";
   el.statusLine.classList.remove("is-error");
 
   try {
     const datos = await cargarViaJSONP(APPS_SCRIPT_URL);
+    if (!Array.isArray(datos)) {
+      throw new Error("El Apps Script no devolvió una lista de registros.");
+    }
 
     registrosOriginales = datos.map(normalizarRegistro);
 
@@ -96,6 +122,7 @@ async function cargarDatos() {
       "Última actualización: " + ahora.toLocaleString("es-PE");
 
     aplicarFiltrosYRenderizar();
+    buscarPorImei(); // refresca el resultado de la búsqueda si había una activa
   } catch (error) {
     console.error(error);
     el.statusLine.textContent =
@@ -103,6 +130,7 @@ async function cargarDatos() {
       error.message + ")";
     el.statusLine.classList.add("is-error");
   } finally {
+    cargando = false;
     el.btnRefrescar.classList.remove("is-loading");
   }
 }
@@ -129,10 +157,16 @@ function normalizarRegistro(fila) {
     color: fila["COLOR"] || "",
     pulidor: (fila["PULIDOR"] || "").trim(),
     pulido: (fila["PULIDO"] || "").trim().toUpperCase(),
-    tecnicoBateria: (fila["BATERIA"] || "").trim(),
-    tecnicoChequeo: (fila["CHEQUEO"] || "").trim(),
+    tecnicoBateria: normalizarNombre(fila["BATERIA"]),
+    tecnicoChequeo: normalizarNombre(fila["CHEQUEO"]),
     lote: (fila["LOTE"] || "Sin lote").trim() || "Sin lote",
   };
+}
+
+// Unifica "Juan", "JUAN" y "juan  perez " para que un mismo técnico
+// no aparezca repetido en el ranking.
+function normalizarNombre(valor) {
+  return String(valor || "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
 // Le muestra al usuario qué rango de fechas existe realmente en los
@@ -162,9 +196,19 @@ function mostrarRangoDeFechasDisponible(registros) {
   // Al abrir la página por primera vez, mostramos solo el último día
   // con actividad (no todo el historial). Si el usuario ya eligió
   // sus propias fechas y le da "Actualizar", no se las pisamos.
+  // Ignoramos fechas futuras (típicamente errores de digitación en la
+  // hoja) para no abrir el panel en un día vacío.
   if (esPrimeraCarga) {
-    el.fechaDesde.value = maxClave;
-    el.fechaHasta.value = maxClave;
+    const hoy = new Date();
+    const claveHoy = [
+      hoy.getFullYear(),
+      String(hoy.getMonth() + 1).padStart(2, "0"),
+      String(hoy.getDate()).padStart(2, "0"),
+    ].join("-");
+    const clavesPasadas = fechasValidas.map(obtenerClaveFecha).filter((c) => c <= claveHoy);
+    const claveInicial = clavesPasadas.length ? clavesPasadas.sort().pop() : maxClave;
+    el.fechaDesde.value = claveInicial;
+    el.fechaHasta.value = claveInicial;
     esPrimeraCarga = false;
   }
 
@@ -271,6 +315,16 @@ function aplicarFiltrosYRenderizar() {
   const base = aplicarFiltrosComunes(registrosOriginales);
   const { desde, hasta } = obtenerRangosSeleccionados();
 
+  if (desde && hasta && desde > hasta) {
+    el.avisoRango.hidden = false;
+    renderizarHero({ total: 0, baterias: 0, chequeos: 0, pulidos: 0 });
+    renderizarRanking(el.rankingBateria, []);
+    renderizarRanking(el.rankingChequeo, []);
+    renderizarTablaModelos([]);
+    return;
+  }
+  el.avisoRango.hidden = true;
+
   // Cada actividad se mide con su propia columna de fecha.
   const registrosPulido = base.filter(
     (r) => r.pulido === "SI" && fechaDentroDeRango(r.fechaPulido, desde, hasta)
@@ -311,6 +365,8 @@ function renderizarHero({ total, baterias, chequeos, pulidos }) {
   el.statPulidos.textContent = pulidos;
 }
 
+const LIMITE_RANKING = 8;
+
 function renderizarRanking(contenedor, entradas) {
   contenedor.innerHTML = "";
 
@@ -321,7 +377,7 @@ function renderizarRanking(contenedor, entradas) {
 
   const maximo = entradas[0][1];
 
-  entradas.slice(0, 8).forEach(([nombre, cantidad]) => {
+  entradas.slice(0, LIMITE_RANKING).forEach(([nombre, cantidad]) => {
     const porcentaje = Math.round((cantidad / maximo) * 100);
 
     const fila = document.createElement("div");
@@ -335,14 +391,27 @@ function renderizarRanking(contenedor, entradas) {
     `;
     contenedor.appendChild(fila);
   });
+
+  if (entradas.length > LIMITE_RANKING) {
+    const resto = document.createElement("p");
+    resto.className = "ranking-empty";
+    resto.textContent = `y ${entradas.length - LIMITE_RANKING} más…`;
+    contenedor.appendChild(resto);
+  }
 }
 
 function renderizarTablaModelos(filas) {
+  if (filas.length === 0) {
+    el.tablaModelos.innerHTML =
+      '<tr><td colspan="3" class="ranking-empty">Sin datos en este rango.</td></tr>';
+    return;
+  }
+
   el.tablaModelos.innerHTML = filas
     .map(
       (f) => `
       <tr>
-        <td>${escaparHtml(f.modelo)}</td>
+        <td>${escaparHtml(f.modelo || "(Sin modelo)")}</td>
         <td>${escaparHtml(f.capacidad)}</td>
         <td>${f.cantidad}</td>
       </tr>`
@@ -415,6 +484,9 @@ function renderizarDetalleImei(registro) {
   return `<div class="imei-result-block"><div class="imei-detail">${campos}</div></div>`;
 }
 
+const MIN_DIGITOS_IMEI = 4;
+const MAX_RESULTADOS_IMEI = 20;
+
 function buscarPorImei() {
   const texto = el.buscadorImei.value.trim();
 
@@ -425,11 +497,18 @@ function buscarPorImei() {
   }
 
   const busquedaLimpia = texto.replace(/\s+/g, "");
+
+  el.panelBusquedaImei.hidden = false;
+
+  if (busquedaLimpia.length < MIN_DIGITOS_IMEI) {
+    el.resultadoImei.innerHTML =
+      `<p class="imei-not-found">Escribe al menos ${MIN_DIGITOS_IMEI} dígitos del IMEI.</p>`;
+    return;
+  }
+
   const coincidencias = registrosOriginales.filter(
     (r) => r.imei.includes(busquedaLimpia) || r.imei2.includes(busquedaLimpia)
   );
-
-  el.panelBusquedaImei.hidden = false;
 
   if (coincidencias.length === 0) {
     el.resultadoImei.innerHTML =
@@ -437,7 +516,12 @@ function buscarPorImei() {
     return;
   }
 
-  el.resultadoImei.innerHTML = coincidencias.map(renderizarDetalleImei).join("");
+  const mostradas = coincidencias.slice(0, MAX_RESULTADOS_IMEI);
+  let html = mostradas.map(renderizarDetalleImei).join("");
+  if (coincidencias.length > MAX_RESULTADOS_IMEI) {
+    html += `<p class="imei-not-found">Mostrando ${MAX_RESULTADOS_IMEI} de ${coincidencias.length} coincidencias. Escribe más dígitos para acotar.</p>`;
+  }
+  el.resultadoImei.innerHTML = html;
 }
 
 // ============================================================
@@ -466,6 +550,38 @@ el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
 el.buscadorImei.addEventListener("input", buscarPorImei);
 
 // ============================================================
-// 9. ARRANQUE
+// 9. NAVEGACIÓN ENTRE VISTAS
 // ============================================================
-cargarDatos();
+// Cada vista carga sus datos solo la primera vez que se abre (la hoja
+// de producción pesa varios MB, no queremos pedirla si el usuario
+// entra directo a otra pestaña). Cada vista registra su cargador en
+// `cargadoresDeVista`.
+const cargadoresDeVista = { produccion: cargarDatos };
+const vistasCargadas = new Set();
+
+function mostrarVista(nombre) {
+  if (!document.getElementById(`vista-${nombre}`)) nombre = "produccion";
+
+  document.querySelectorAll(".vista").forEach((vista) => {
+    vista.hidden = vista.id !== `vista-${nombre}`;
+  });
+  document.querySelectorAll(".nav-link[data-vista]").forEach((enlace) => {
+    enlace.classList.toggle("nav-link--active", enlace.dataset.vista === nombre);
+  });
+
+  if (cargadoresDeVista[nombre] && !vistasCargadas.has(nombre)) {
+    vistasCargadas.add(nombre);
+    cargadoresDeVista[nombre]();
+  }
+}
+
+const vistaDesdeHash = () => location.hash.replace("#", "") || "produccion";
+
+window.addEventListener("hashchange", () => mostrarVista(vistaDesdeHash()));
+
+// ============================================================
+// 10. ARRANQUE
+// ============================================================
+// Esperamos a DOMContentLoaded para que reparacion.js (que se carga
+// después) ya haya registrado su cargador.
+document.addEventListener("DOMContentLoaded", () => mostrarVista(vistaDesdeHash()));
