@@ -56,7 +56,7 @@ const el = {
 // Apps Script (ver el doGet actualizado) envuelve el JSON en una
 // llamada a la función que le indiquemos por la URL.
 let contadorCallbacks = 0;
-const TIMEOUT_CARGA_MS = 120000; // la hoja pesa ~5 MB y Apps Script tarda ~40 s en responder
+const TIMEOUT_CARGA_MS = 120000; // margen amplio: la carga "en frío" (sin caché) puede tardar
 
 function cargarViaJSONP(url) {
   return new Promise((resolve, reject) => {
@@ -98,7 +98,10 @@ function cargarViaJSONP(url) {
   });
 }
 
-async function cargarDatos() {
+// `forzar` = true (botón Actualizar) le pide al script que ignore su
+// caché y relea la hoja: es más lento, pero trae lo último. La carga
+// inicial usa la caché del script y suele responder en pocos segundos.
+async function cargarDatos(forzar = false) {
   if (cargando) return; // ignora clics repetidos mientras hay una carga en curso
   cargando = true;
   el.btnRefrescar.classList.add("is-loading");
@@ -106,12 +109,18 @@ async function cargarDatos() {
   el.statusLine.classList.remove("is-error");
 
   try {
-    const datos = await cargarViaJSONP(APPS_SCRIPT_URL);
-    if (!Array.isArray(datos)) {
-      throw new Error("El Apps Script no devolvió una lista de registros.");
+    const inicio = performance.now();
+    const datos = await cargarViaJSONP(forzar ? `${APPS_SCRIPT_URL}?fresco=1` : APPS_SCRIPT_URL);
+    if (datos && datos.error) throw new Error(datos.error);
+    if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
+      throw new Error("Formato inesperado: publica la última versión de apps-script/produccion.gs.");
     }
+    console.info(
+      `Producción: ${datos.filas.length} filas en ${Math.round(performance.now() - inicio)} ms ` +
+      `(datos generados ${datos.generado}; el script tardó ${JSON.stringify(datos.ms)} ms)`
+    );
 
-    registrosOriginales = datos.map(normalizarRegistro);
+    registrosOriginales = datos.filas.map((fila) => normalizarRegistro(filaAObjeto(datos.columnas, fila)));
 
     poblarSelectorDeLotes(registrosOriginales);
     mostrarRangoDeFechasDisponible(registrosOriginales);
@@ -122,7 +131,6 @@ async function cargarDatos() {
       "Última actualización: " + ahora.toLocaleString("es-PE");
 
     aplicarFiltrosYRenderizar();
-    buscarPorImei(); // refresca el resultado de la búsqueda si había una activa
   } catch (error) {
     console.error(error);
     el.statusLine.textContent =
@@ -135,27 +143,27 @@ async function cargarDatos() {
   }
 }
 
-// Convierte cada fila cruda del JSON en un objeto con nombres de
-// campo consistentes y tipos ya "limpios" (fechas, números).
-// Hacemos esto UNA vez al cargar, para no repetir esta lógica cada
-// vez que filtramos o dibujamos la tabla.
+// El script envía las filas como listas cortas (sin repetir el nombre
+// de cada columna en cada fila) para que la respuesta pese poco.
+function filaAObjeto(columnas, fila) {
+  const objeto = {};
+  columnas.forEach((nombre, i) => (objeto[nombre] = fila[i]));
+  return objeto;
+}
+
+// Convierte cada fila en un objeto con nombres de campo consistentes.
+// Hacemos esto UNA vez al cargar, para no repetir esta lógica cada vez
+// que filtramos o dibujamos la tabla. Las fechas ya vienen del script
+// como texto "AAAA-MM-DD" (o "" si la celda está vacía).
 function normalizarRegistro(fila) {
   return {
-    raw: fila, // guardamos la fila completa, tal cual vino, para el detalle de búsqueda
-    fechaIngreso: fila["FECHA"] ? new Date(fila["FECHA"]) : null,
     // Estas tres son las que de verdad importan para filtrar por rango:
     // cada actividad del taller quedó registrada en su propia columna.
-    fechaPulido: fila["FECHA DE PULIDO"] ? new Date(fila["FECHA DE PULIDO"]) : null,
-    fechaBateria: fila["FECHA CAMBIO BATERIA"] ? new Date(fila["FECHA CAMBIO BATERIA"]) : null,
-    fechaChequeo: fila["FECHA DE CHEQUEO"] ? new Date(fila["FECHA DE CHEQUEO"]) : null,
+    fechaPulido: fila["FECHA DE PULIDO"] || "",
+    fechaBateria: fila["FECHA CAMBIO BATERIA"] || "",
+    fechaChequeo: fila["FECHA DE CHEQUEO"] || "",
     modelo: fila["MODELO"] || "",
     capacidad: fila["CAPACIDAD"] || "",
-    imei: String(fila["IMEI"] || ""),
-    imei2: String(fila["imei 2"] || ""),
-    bateriaPct: fila["% BATERIA"] != null ? Number(fila["% BATERIA"]) : null,
-    grado: fila["GRADO"] || "",
-    color: fila["COLOR"] || "",
-    pulidor: (fila["PULIDOR"] || "").trim(),
     pulido: (fila["PULIDO"] || "").trim().toUpperCase(),
     tecnicoBateria: normalizarNombre(fila["BATERIA"]),
     tecnicoChequeo: normalizarNombre(fila["CHEQUEO"]),
@@ -175,18 +183,16 @@ function normalizarNombre(valor) {
 function mostrarRangoDeFechasDisponible(registros) {
   const fechasValidas = registros
     .flatMap((r) => [r.fechaPulido, r.fechaBateria, r.fechaChequeo])
-    .filter((f) => f instanceof Date && !isNaN(f));
+    .filter(Boolean)
+    .sort(); // "AAAA-MM-DD" ordena bien como texto
 
   if (fechasValidas.length === 0) {
     el.rangoFechas.textContent = "No se encontraron fechas válidas en las columnas de pulido, batería o chequeo.";
     return;
   }
 
-  const minFecha = new Date(Math.min(...fechasValidas));
-  const maxFecha = new Date(Math.max(...fechasValidas));
-
-  const minClave = obtenerClaveFecha(minFecha);
-  const maxClave = obtenerClaveFecha(maxFecha);
+  const minClave = fechasValidas[0];
+  const maxClave = fechasValidas[fechasValidas.length - 1];
 
   el.fechaDesde.min = minClave;
   el.fechaDesde.max = maxClave;
@@ -205,17 +211,23 @@ function mostrarRangoDeFechasDisponible(registros) {
       String(hoy.getMonth() + 1).padStart(2, "0"),
       String(hoy.getDate()).padStart(2, "0"),
     ].join("-");
-    const clavesPasadas = fechasValidas.map(obtenerClaveFecha).filter((c) => c <= claveHoy);
-    const claveInicial = clavesPasadas.length ? clavesPasadas.sort().pop() : maxClave;
+    const clavesPasadas = fechasValidas.filter((c) => c <= claveHoy);
+    const claveInicial = clavesPasadas.length ? clavesPasadas[clavesPasadas.length - 1] : maxClave;
     el.fechaDesde.value = claveInicial;
     el.fechaHasta.value = claveInicial;
     esPrimeraCarga = false;
   }
 
   el.rangoFechas.textContent =
-    `Actividad registrada del ${minFecha.toLocaleDateString("es-PE", { timeZone: "UTC" })} ` +
-    `al ${maxFecha.toLocaleDateString("es-PE", { timeZone: "UTC" })} ` +
+    `Actividad registrada del ${formatearClaveFecha(minClave)} ` +
+    `al ${formatearClaveFecha(maxClave)} ` +
     `(considerando pulido, cambio de batería y chequeo).`;
+}
+
+// "2026-09-18" -> "18/09/2026"
+function formatearClaveFecha(clave) {
+  const [anio, mes, dia] = clave.split("-");
+  return `${dia}/${mes}/${anio}`;
 }
 
 function poblarSelectorDeLotes(registros) {
@@ -239,20 +251,6 @@ function poblarSelectorDeLotes(registros) {
 // ============================================================
 // 4. FILTRADO
 // ============================================================
-// Convierte una fecha a "AAAA-MM-DD" usando sus componentes UTC.
-// Hacemos esto porque las fechas que vienen de Google Sheets traen
-// una hora pegada (por el desfase de zona horaria al convertirse a
-// UTC), y comparar el instante exacto rompe el filtro cuando el
-// usuario elige "Hasta" el mismo día de un registro. Comparando solo
-// el día calendario, ese problema desaparece.
-function obtenerClaveFecha(fecha) {
-  if (!fecha) return null;
-  const anio = fecha.getUTCFullYear();
-  const mes = String(fecha.getUTCMonth() + 1).padStart(2, "0");
-  const dia = String(fecha.getUTCDate()).padStart(2, "0");
-  return `${anio}-${mes}-${dia}`;
-}
-
 // Filtro común para todas las secciones del panel (menos el buscador
 // de IMEI, que ignora todo esto a propósito — ver sección 6).
 function aplicarFiltrosComunes(registros) {
@@ -260,14 +258,13 @@ function aplicarFiltrosComunes(registros) {
   return registros.filter((r) => !lote || r.lote === lote);
 }
 
-// true si `fecha` cae dentro de [desde, hasta]. Si desde/hasta están
-// vacíos, no restringe por ese lado. Si `fecha` es null (esa columna
-// está vacía en esa fila), el registro se excluye en cuanto se pide
-// un rango — no tiene sentido "contarlo" en un rango si no sabemos
-// cuándo pasó esa actividad.
-function fechaDentroDeRango(fecha, desde, hasta) {
+// true si `clave` ("AAAA-MM-DD") cae dentro de [desde, hasta]. Si
+// desde/hasta están vacíos, no restringe por ese lado. Si `clave` está
+// vacía (esa columna no tiene fecha en esa fila), el registro se
+// excluye en cuanto se pide un rango — no tiene sentido "contarlo" en
+// un rango si no sabemos cuándo pasó esa actividad.
+function fechaDentroDeRango(clave, desde, hasta) {
   if (!desde && !hasta) return true;
-  const clave = obtenerClaveFecha(fecha);
   if (!clave) return false;
   if (desde && clave < desde) return false;
   if (hasta && clave > hasta) return false;
@@ -365,8 +362,6 @@ function renderizarHero({ total, baterias, chequeos, pulidos }) {
   el.statPulidos.textContent = pulidos;
 }
 
-const LIMITE_RANKING = 8;
-
 function renderizarRanking(contenedor, entradas) {
   contenedor.innerHTML = "";
 
@@ -377,7 +372,7 @@ function renderizarRanking(contenedor, entradas) {
 
   const maximo = entradas[0][1];
 
-  entradas.slice(0, LIMITE_RANKING).forEach(([nombre, cantidad]) => {
+  entradas.forEach(([nombre, cantidad]) => {
     const porcentaje = Math.round((cantidad / maximo) * 100);
 
     const fila = document.createElement("div");
@@ -391,13 +386,6 @@ function renderizarRanking(contenedor, entradas) {
     `;
     contenedor.appendChild(fila);
   });
-
-  if (entradas.length > LIMITE_RANKING) {
-    const resto = document.createElement("p");
-    resto.className = "ranking-empty";
-    resto.textContent = `y ${entradas.length - LIMITE_RANKING} más…`;
-    contenedor.appendChild(resto);
-  }
 }
 
 function renderizarTablaModelos(filas) {
@@ -422,10 +410,10 @@ function renderizarTablaModelos(filas) {
 // ============================================================
 // 6. BÚSQUEDA POR IMEI (independiente de fecha y lote)
 // ============================================================
-// El usuario pidió que esto busque en TODA la información sin
-// importar los filtros de fecha o lote — por eso usa siempre
-// `registrosOriginales` directamente, nunca el resultado de
-// aplicarFiltrosComunes().
+// Busca en TODA la información sin importar los filtros de fecha o
+// lote. Como el panel ya no descarga las columnas de detalle, la
+// búsqueda se le pide al Apps Script (?imei=...), que devuelve solo las
+// filas que coinciden con todas sus columnas.
 const ETIQUETAS_DETALLE_IMEI = [
   ["MODELO", "Modelo", "texto"],
   ["CAPACIDAD", "Capacidad", "texto"],
@@ -473,7 +461,7 @@ function formatearValorDetalle(valor, tipo) {
 
 function renderizarDetalleImei(registro) {
   const campos = ETIQUETAS_DETALLE_IMEI.map(([clave, etiqueta, tipo]) => {
-    const valor = formatearValorDetalle(registro.raw[clave], tipo);
+    const valor = formatearValorDetalle(registro[clave], tipo);
     return `
       <div class="imei-field">
         <span class="imei-field-label">${escaparHtml(etiqueta)}</span>
@@ -485,10 +473,20 @@ function renderizarDetalleImei(registro) {
 }
 
 const MIN_DIGITOS_IMEI = 4;
-const MAX_RESULTADOS_IMEI = 20;
 
-function buscarPorImei() {
+let temporizadorImei = null;
+let idBusquedaImei = 0;
+
+// Espera a que el usuario deje de escribir antes de consultar, para no
+// mandar una petición por cada tecla.
+function programarBusquedaImei() {
+  clearTimeout(temporizadorImei);
+  temporizadorImei = setTimeout(buscarPorImei, 400);
+}
+
+async function buscarPorImei() {
   const texto = el.buscadorImei.value.trim();
+  const id = ++idBusquedaImei; // invalida cualquier búsqueda anterior aún en curso
 
   if (!texto) {
     el.panelBusquedaImei.hidden = true;
@@ -506,32 +504,36 @@ function buscarPorImei() {
     return;
   }
 
-  const coincidencias = registrosOriginales.filter(
-    (r) => r.imei.includes(busquedaLimpia) || r.imei2.includes(busquedaLimpia)
-  );
+  el.resultadoImei.innerHTML = '<p class="imei-not-found">Buscando…</p>';
 
-  if (coincidencias.length === 0) {
+  try {
+    const url = `${APPS_SCRIPT_URL}?imei=${encodeURIComponent(busquedaLimpia)}`;
+    const respuesta = await cargarViaJSONP(url);
+    if (id !== idBusquedaImei) return; // el usuario ya escribió otra cosa
+    if (respuesta.error) throw new Error(respuesta.error);
+
+    if (respuesta.filas.length === 0) {
+      el.resultadoImei.innerHTML =
+        '<p class="imei-not-found">No se encontró ningún equipo con ese IMEI.</p>';
+      return;
+    }
+
+    let html = respuesta.filas.map(renderizarDetalleImei).join("");
+    if (respuesta.total > respuesta.filas.length) {
+      html += `<p class="imei-not-found">Mostrando ${respuesta.filas.length} de ${respuesta.total} coincidencias. Escribe más dígitos para acotar.</p>`;
+    }
+    el.resultadoImei.innerHTML = html;
+  } catch (error) {
+    if (id !== idBusquedaImei) return;
+    console.error(error);
     el.resultadoImei.innerHTML =
-      '<p class="imei-not-found">No se encontró ningún equipo con ese IMEI.</p>';
-    return;
+      `<p class="imei-not-found">No se pudo buscar. (${escaparHtml(error.message)})</p>`;
   }
-
-  const mostradas = coincidencias.slice(0, MAX_RESULTADOS_IMEI);
-  let html = mostradas.map(renderizarDetalleImei).join("");
-  if (coincidencias.length > MAX_RESULTADOS_IMEI) {
-    html += `<p class="imei-not-found">Mostrando ${MAX_RESULTADOS_IMEI} de ${coincidencias.length} coincidencias. Escribe más dígitos para acotar.</p>`;
-  }
-  el.resultadoImei.innerHTML = html;
 }
 
 // ============================================================
 // 7. UTILIDADES
 // ============================================================
-function formatearFecha(fecha) {
-  if (!fecha) return "—";
-  return fecha.toLocaleDateString("es-PE");
-}
-
 // Evita que texto proveniente de la hoja rompa el HTML o inyecte
 // código si alguien escribe algo raro en una celda.
 function escaparHtml(texto) {
@@ -543,11 +545,11 @@ function escaparHtml(texto) {
 // ============================================================
 // 8. EVENTOS
 // ============================================================
-el.btnRefrescar.addEventListener("click", cargarDatos);
+el.btnRefrescar.addEventListener("click", () => cargarDatos(true));
 el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
 el.fechaHasta.addEventListener("change", aplicarFiltrosYRenderizar);
 el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
-el.buscadorImei.addEventListener("input", buscarPorImei);
+el.buscadorImei.addEventListener("input", programarBusquedaImei);
 
 // ============================================================
 // 9. NAVEGACIÓN ENTRE VISTAS

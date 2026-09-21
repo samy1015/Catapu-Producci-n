@@ -372,6 +372,7 @@ main {
 }
 
 .ranking-fill {
+  display: block; /* es un <span>: sin esto el navegador ignora width/height y la barra no se dibuja */
   height: 100%;
   background: var(--accent);
   border-radius: 2px;
