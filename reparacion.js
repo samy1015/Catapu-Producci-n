@@ -2,7 +2,7 @@
 // VISTA REPARACIÓN
 // ============================================================
 // Se carga después de script.js y reutiliza sus utilidades globales:
-// cargarViaJSONP, normalizarNombre, contarPorCampo,
+// cargarViaJSONP, filaAObjeto, normalizarNombre, contarPorCampo,
 // renderizarRanking y escaparHtml.
 (function () {
   // Script ligado a la spreadsheet "EQUIPOS REPARADOS" (apps-script/reparaciones.gs).
@@ -15,9 +15,15 @@
   const COLORES_DONA = ["#ff8a3d", "#3ddc84", "#ffc24b", "#5cc8ff", "#b18cff", "#ff6b9d", "#8fa1a6"];
   const MAX_PORCIONES = COLORES_DONA.length - 1; // la última es "OTROS"
 
+  // Al abrir la página solo pedimos los últimos meses; si el usuario elige
+  // fechas anteriores, se vuelve a consultar al script con ese rango.
+  const MESES_INICIALES = 5;
+
   let registros = [];
-  let cargando = false;
+  let idCarga = 0; // solo la última petición actualiza la pantalla
   let esPrimeraCarga = true;
+  // Fecha ("AAAA-MM-DD") desde la cual tenemos datos cargados; null = todo el historial.
+  let cobertura = inicioDeMesHaceMeses(MESES_INICIALES);
 
   const ui = {
     status: document.getElementById("rep-status-line"),
@@ -41,33 +47,48 @@
   // ----------------------------------------------------------
   // Carga
   // ----------------------------------------------------------
-  async function cargarReparaciones() {
-    if (cargando) return;
-    cargando = true;
+  // Carga los datos desde `cobertura`. La usan la carga inicial, el botón
+  // Actualizar y los cambios de fecha que salen del rango ya cargado.
+  // `forzar` (solo el botón Actualizar) le pide al script que ignore su
+  // caché y relea la hoja: es más lento, pero trae lo último.
+  async function cargarReparaciones(forzar = false) {
+    const id = ++idCarga;
     ui.btn.classList.add("is-loading");
     ui.status.textContent = "Cargando datos…";
     ui.status.classList.remove("is-error");
 
     try {
-      const datos = await cargarViaJSONP(URL_REPARACIONES);
-      if (!Array.isArray(datos)) {
-        // El script devuelve { error: "..." } cuando algo falla de su lado.
-        throw new Error((datos && datos.error) || "El Apps Script no devolvió una lista de registros.");
-      }
+      const parametros = [];
+      if (cobertura) parametros.push(`desde=${cobertura}`);
+      if (forzar) parametros.push("fresco=1");
+      const url = parametros.length ? `${URL_REPARACIONES}?${parametros.join("&")}` : URL_REPARACIONES;
 
-      registros = datos.map(normalizar);
+      const inicio = performance.now();
+      const datos = await cargarViaJSONP(url);
+      if (id !== idCarga) return; // ya se pidió otra cosa más reciente
+      // El script devuelve { error: "..." } cuando algo falla de su lado.
+      if (datos && datos.error) throw new Error(datos.error);
+      if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
+        throw new Error("Formato inesperado: publica la última versión de apps-script/reparaciones.gs.");
+      }
+      console.info(
+        `Reparación: ${datos.filas.length} filas en ${Math.round(performance.now() - inicio)} ms ` +
+        `(datos generados ${datos.generado}; el script tardó ${JSON.stringify(datos.ms)} ms)`
+      );
+
+      registros = datos.filas.map((fila) => normalizar(filaAObjeto(datos.columnas, fila)));
       poblarTecnicos();
       prepararFechas();
       ui.status.textContent = `${registros.length} registros cargados.`;
       ui.ultima.textContent = "Última actualización: " + new Date().toLocaleString("es-PE");
       renderizar();
     } catch (error) {
+      if (id !== idCarga) return;
       console.error(error);
       ui.status.textContent = "No se pudieron cargar los datos de reparación. (" + error.message + ")";
       ui.status.classList.add("is-error");
     } finally {
-      cargando = false;
-      ui.btn.classList.remove("is-loading");
+      if (id === idCarga) ui.btn.classList.remove("is-loading");
     }
   }
 
@@ -94,13 +115,20 @@
     if (tecnicos.includes(actual)) ui.tecnico.value = actual;
   }
 
-  function claveDeHoy() {
-    const hoy = new Date();
+  function claveDeFecha(fecha) {
     return [
-      hoy.getFullYear(),
-      String(hoy.getMonth() + 1).padStart(2, "0"),
-      String(hoy.getDate()).padStart(2, "0"),
+      fecha.getFullYear(),
+      String(fecha.getMonth() + 1).padStart(2, "0"),
+      String(fecha.getDate()).padStart(2, "0"),
     ].join("-");
+  }
+
+  // Día 1 del mes de hace `meses` meses (así siempre cubre al menos ese lapso).
+  function inicioDeMesHaceMeses(meses) {
+    const fecha = new Date();
+    fecha.setDate(1);
+    fecha.setMonth(fecha.getMonth() - meses);
+    return claveDeFecha(fecha);
   }
 
   function prepararFechas() {
@@ -110,15 +138,15 @@
       return;
     }
 
-    const min = fechas[0];
     const max = fechas[fechas.length - 1];
-    ui.desde.min = ui.hasta.min = min;
+    // Sin límite inferior: el usuario puede elegir fechas anteriores a lo
+    // ya cargado y entonces se consultan.
     ui.desde.max = ui.hasta.max = max;
 
     // Igual que en Producción: al abrir, el último día con actividad
     // (ignorando fechas futuras, que suelen ser errores de digitación).
     if (esPrimeraCarga) {
-      const hoy = claveDeHoy();
+      const hoy = claveDeFecha(new Date());
       const pasadas = fechas.filter((f) => f <= hoy);
       const inicial = pasadas.length ? pasadas[pasadas.length - 1] : max;
       ui.desde.value = inicial;
@@ -126,7 +154,9 @@
       esPrimeraCarga = false;
     }
 
-    ui.rango.textContent = `Reparaciones registradas del ${formatearClave(min)} al ${formatearClave(max)}.`;
+    ui.rango.textContent = cobertura
+      ? `Datos cargados desde el ${formatearClave(cobertura)} hasta el ${formatearClave(max)}. Al elegir fechas anteriores se consultan automáticamente.`
+      : `Datos cargados de todo el historial, hasta el ${formatearClave(max)}.`;
   }
 
   function formatearClave(clave) {
@@ -290,13 +320,26 @@
     ui.matrizBody.innerHTML = filas.join("");
   }
 
+  // Si el rango pedido empieza antes de lo ya cargado (o se borra "Desde"
+  // = todo el historial), hay que volver a consultar al script.
+  function alCambiarFecha() {
+    const desde = ui.desde.value || null;
+    const faltanDatos = cobertura !== null && (desde === null || desde < cobertura);
+    if (faltanDatos) {
+      cobertura = desde;
+      cargarReparaciones();
+      return;
+    }
+    renderizar();
+  }
+
   // ----------------------------------------------------------
   // Eventos y registro en la navegación
   // ----------------------------------------------------------
-  ui.btn.addEventListener("click", cargarReparaciones);
-  ui.desde.addEventListener("change", renderizar);
-  ui.hasta.addEventListener("change", renderizar);
+  ui.btn.addEventListener("click", () => cargarReparaciones(true));
+  ui.desde.addEventListener("change", alCambiarFecha);
+  ui.hasta.addEventListener("change", alCambiarFecha);
   ui.tecnico.addEventListener("change", renderizar);
 
-  cargadoresDeVista.reparacion = cargarReparaciones;
+  cargadoresDeVista.reparacion = () => cargarReparaciones();
 })();

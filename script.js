@@ -584,12 +584,10 @@ el.tablaModelos.addEventListener("keydown", (evento) => {
 // ============================================================
 // 9. NAVEGACIÓN ENTRE VISTAS
 // ============================================================
-// Cada vista carga sus datos solo la primera vez que se abre (la hoja
-// de producción pesa varios MB, no queremos pedirla si el usuario
-// entra directo a otra pestaña). Cada vista registra su cargador en
-// `cargadoresDeVista`.
+// Cada vista registra su cargador en `cargadoresDeVista`. Al abrir la
+// página se lanzan TODOS a la vez, así los datos de cada pestaña ya
+// están listos (o casi) cuando el usuario cambia de una a otra.
 const cargadoresDeVista = { produccion: cargarDatos };
-const vistasCargadas = new Set();
 
 function mostrarVista(nombre) {
   if (!document.getElementById(`vista-${nombre}`)) nombre = "produccion";
@@ -600,11 +598,6 @@ function mostrarVista(nombre) {
   document.querySelectorAll(".nav-link[data-vista]").forEach((enlace) => {
     enlace.classList.toggle("nav-link--active", enlace.dataset.vista === nombre);
   });
-
-  if (cargadoresDeVista[nombre] && !vistasCargadas.has(nombre)) {
-    vistasCargadas.add(nombre);
-    cargadoresDeVista[nombre]();
-  }
 }
 
 const vistaDesdeHash = () => location.hash.replace("#", "") || "produccion";
@@ -616,4 +609,7 @@ window.addEventListener("hashchange", () => mostrarVista(vistaDesdeHash()));
 // ============================================================
 // Esperamos a DOMContentLoaded para que reparacion.js (que se carga
 // después) ya haya registrado su cargador.
-document.addEventListener("DOMContentLoaded", () => mostrarVista(vistaDesdeHash()));
+document.addEventListener("DOMContentLoaded", () => {
+  mostrarVista(vistaDesdeHash());
+  Object.values(cargadoresDeVista).forEach((cargar) => cargar());
+});
