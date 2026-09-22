@@ -43,7 +43,44 @@ const el = {
   tablaModelos: document.querySelector("#tabla-modelos tbody"),
 
   ultimaActualizacion: document.getElementById("ultima-actualizacion"),
+
+  btnTema: document.getElementById("btn-tema"),
 };
+
+// ============================================================
+// 2b. TEMA (claro / oscuro)
+// ============================================================
+// El <head> de index.html ya decidió el tema inicial (para que no
+// parpadee al cargar). Esta parte solo se encarga de: alternar cuando
+// el usuario hace clic, guardar su elección, y mantener el ícono del
+// botón acorde al tema activo.
+function aplicarTema(tema) {
+  if (tema === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  try {
+    localStorage.setItem("catapu-tema", tema);
+  } catch (error) {
+    // Sin localStorage, el tema simplemente no se recuerda entre visitas.
+  }
+  actualizarBotonTema(tema);
+}
+
+function actualizarBotonTema(tema) {
+  if (!el.btnTema) return;
+  const esClaro = tema === "light";
+  el.btnTema.querySelector(".theme-toggle-icon").textContent = esClaro ? "☀" : "☾";
+  el.btnTema.title = esClaro ? "Cambiar a modo oscuro" : "Cambiar a modo claro";
+  el.btnTema.setAttribute("aria-label", el.btnTema.title);
+}
+
+function temaActual() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+
+actualizarBotonTema(temaActual()); // sincroniza el ícono con lo que el <head> ya decidió
 
 // ============================================================
 // 3. CARGA DE DATOS
@@ -569,6 +606,9 @@ el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
 el.fechaHasta.addEventListener("change", aplicarFiltrosYRenderizar);
 el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
 el.buscadorImei.addEventListener("input", programarBusquedaImei);
+if (el.btnTema) {
+  el.btnTema.addEventListener("click", () => aplicarTema(temaActual() === "light" ? "dark" : "light"));
+}
 el.tablaModelos.addEventListener("click", (evento) => {
   const fila = evento.target.closest(".fila-modelo");
   if (fila) alternarColores(fila);

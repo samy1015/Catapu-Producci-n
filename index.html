@@ -8,6 +8,22 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
+  <script>
+    // Decide el tema ANTES de pintar la página, para que no se vea un
+    // parpadeo (cargar en oscuro y saltar a claro medio segundo después).
+    // Si el usuario ya eligió antes, se respeta esa elección; si nunca
+    // eligió, se usa lo que prefiera el sistema operativo.
+    (function () {
+      try {
+        var guardado = localStorage.getItem("catapu-tema");
+        var claro = guardado ? guardado === "light" : matchMedia("(prefers-color-scheme: light)").matches;
+        if (claro) document.documentElement.setAttribute("data-theme", "light");
+      } catch (error) {
+        // localStorage puede fallar en navegación privada muy restrictiva;
+        // si pasa, simplemente se queda con el tema oscuro por defecto.
+      }
+    })();
+  </script>
 </head>
 <body>
 
@@ -24,6 +40,12 @@
         <a href="#reparacion" class="nav-link" data-vista="reparacion">Reparación</a>
         <a href="#garantias" class="nav-link" data-vista="garantias">Garantías</a>
       </nav>
+
+      <div class="sidebar-footer">
+        <button id="btn-tema" class="theme-toggle" type="button">
+          <span class="theme-toggle-icon" aria-hidden="true">☾</span>
+        </button>
+      </div>
     </aside>
 
     <!-- ============ CONTENIDO PRINCIPAL ============ -->
