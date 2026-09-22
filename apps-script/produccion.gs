@@ -36,10 +36,13 @@ const COLUMNAS_PANEL = [
   "CAPACIDAD",
   "COLOR",
   "LOTE",
+  "IMEI",
 ];
 const COLUMNAS_CON_FECHA = ["FECHA DE PULIDO", "FECHA CAMBIO BATERIA", "FECHA DE CHEQUEO"];
 
-const CACHE_PREFIJO = "prod_v2"; // súbelo si cambias COLUMNAS_PANEL, para no servir una caché con columnas viejas
+const CACHE_PREFIJO = "prod_v3"; // súbelo si cambias COLUMNAS_PANEL, para no servir una caché con columnas viejas
+// v3: se agregó IMEI, para que Garantías (apps-script/garantias.gs) pueda
+// cruzar sus tickets de RepairDesk con el modelo/capacidad/color de aquí.
 const CACHE_TTL_SEG = 900;  // 15 min; el disparador la renueva cada 10
 const CACHE_TAM_TROZO = 40000; // cada valor de caché admite hasta 100 KB
 

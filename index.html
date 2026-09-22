@@ -22,7 +22,7 @@
       <nav class="sidebar-nav">
         <a href="#produccion" class="nav-link nav-link--active" data-vista="produccion">Producción</a>
         <a href="#reparacion" class="nav-link" data-vista="reparacion">Reparación</a>
-        <a href="#" class="nav-link nav-link--disabled" title="Próximamente" aria-disabled="true" tabindex="-1">Garantías</a>
+        <a href="#garantias" class="nav-link" data-vista="garantias">Garantías</a>
       </nav>
     </aside>
 
@@ -208,10 +208,55 @@
 
     </div><!-- /vista-reparacion -->
 
+    <!-- ---------- Vista: Garantías ---------- -->
+    <div class="vista" id="vista-garantias" hidden>
+
+      <header class="topbar">
+        <h1 class="page-title">Garantías</h1>
+
+        <div class="controls">
+          <label class="control control--search">
+            <span class="control-label">Buscar IMEI</span>
+            <input type="search" id="gar-buscador-imei" placeholder="Buscar por IMEI…" class="search-box" inputmode="numeric" />
+          </label>
+          <label class="control">
+            <span class="control-label">Desde</span>
+            <input type="date" id="gar-fecha-desde" />
+          </label>
+          <label class="control">
+            <span class="control-label">Hasta</span>
+            <input type="date" id="gar-fecha-hasta" />
+          </label>
+          <button id="gar-btn-refrescar" class="btn-refresh" title="Volver a cargar datos">
+            <span class="refresh-icon">↻</span> Actualizar
+          </button>
+        </div>
+      </header>
+
+      <p class="status-line" id="gar-status-line" aria-live="polite">Cargando datos…</p>
+      <p class="status-line is-error" id="gar-aviso-rango" role="alert" hidden>
+        La fecha "Desde" es posterior a "Hasta". Corrige el rango para ver resultados.
+      </p>
+      <p class="status-line is-error" id="gar-aviso-errores" hidden></p>
+      <p class="status-line" id="gar-nota">
+        Capacidad y color se completan cruzando el IMEI con Producción; si un equipo no aparece ahí, esos campos quedan vacíos.
+      </p>
+
+      <main id="gar-tiendas">
+        <!-- Un bloque por tienda, generado por garantias.js -->
+      </main>
+
+      <footer class="footer">
+        <span id="gar-ultima-actualizacion"></span>
+      </footer>
+
+    </div><!-- /vista-garantias -->
+
     </div>
   </div>
 
   <script src="script.js"></script>
   <script src="reparacion.js"></script>
+  <script src="garantias.js"></script>
 </body>
 </html>
