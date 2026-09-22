@@ -164,6 +164,7 @@ function normalizarRegistro(fila) {
     fechaChequeo: fila["FECHA DE CHEQUEO"] || "",
     modelo: fila["MODELO"] || "",
     capacidad: fila["CAPACIDAD"] || "",
+    color: normalizarNombre(fila["COLOR"]) || "SIN COLOR",
     pulido: (fila["PULIDO"] || "").trim().toUpperCase(),
     tecnicoBateria: normalizarNombre(fila["BATERIA"]),
     tecnicoChequeo: normalizarNombre(fila["CHEQUEO"]),
@@ -291,17 +292,21 @@ function contarPorCampo(registros, campo) {
   return [...conteo.entries()].sort((a, b) => b[1] - a[1]);
 }
 
+// Agrupa por modelo + capacidad y, dentro de cada grupo, cuenta cuántos
+// equipos hubo de cada color (para el detalle desplegable).
 function contarModelos(registros) {
-  const conteo = new Map();
+  const grupos = new Map();
   registros.forEach((r) => {
     const clave = `${r.modelo}||${r.capacidad}`;
-    conteo.set(clave, (conteo.get(clave) || 0) + 1);
+    if (!grupos.has(clave)) {
+      grupos.set(clave, { modelo: r.modelo, capacidad: r.capacidad, cantidad: 0, colores: new Map() });
+    }
+    const grupo = grupos.get(clave);
+    grupo.cantidad++;
+    grupo.colores.set(r.color, (grupo.colores.get(r.color) || 0) + 1);
   });
-  return [...conteo.entries()]
-    .map(([clave, cantidad]) => {
-      const [modelo, capacidad] = clave.split("||");
-      return { modelo, capacidad, cantidad };
-    })
+  return [...grupos.values()]
+    .map((g) => ({ ...g, colores: [...g.colores.entries()].sort((a, b) => b[1] - a[1]) }))
     .sort((a, b) => b.cantidad - a.cantidad);
 }
 
@@ -388,6 +393,8 @@ function renderizarRanking(contenedor, entradas) {
   });
 }
 
+// Cada modelo es una fila clicable; justo debajo va una fila oculta con
+// los colores que salieron. Se abre/cierra con clic o con Enter/Espacio.
 function renderizarTablaModelos(filas) {
   if (filas.length === 0) {
     el.tablaModelos.innerHTML =
@@ -396,15 +403,27 @@ function renderizarTablaModelos(filas) {
   }
 
   el.tablaModelos.innerHTML = filas
-    .map(
-      (f) => `
-      <tr>
-        <td>${escaparHtml(f.modelo || "(Sin modelo)")}</td>
+    .map((f, i) => {
+      const colores = f.colores
+        .map(([color, n]) => `<li><span>${escaparHtml(color)}</span> <strong>${n}</strong></li>`)
+        .join("");
+      return `
+      <tr class="fila-modelo" tabindex="0" role="button" aria-expanded="false" aria-controls="colores-${i}">
+        <td><span class="chevron" aria-hidden="true">▸</span>${escaparHtml(f.modelo || "(Sin modelo)")}</td>
         <td>${escaparHtml(f.capacidad)}</td>
         <td>${f.cantidad}</td>
-      </tr>`
-    )
+      </tr>
+      <tr class="fila-colores" id="colores-${i}" hidden>
+        <td colspan="3"><ul class="lista-colores">${colores}</ul></td>
+      </tr>`;
+    })
     .join("");
+}
+
+function alternarColores(filaModelo) {
+  const abierta = filaModelo.getAttribute("aria-expanded") === "true";
+  filaModelo.setAttribute("aria-expanded", String(!abierta));
+  filaModelo.nextElementSibling.hidden = abierta;
 }
 
 // ============================================================
@@ -550,6 +569,17 @@ el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
 el.fechaHasta.addEventListener("change", aplicarFiltrosYRenderizar);
 el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
 el.buscadorImei.addEventListener("input", programarBusquedaImei);
+el.tablaModelos.addEventListener("click", (evento) => {
+  const fila = evento.target.closest(".fila-modelo");
+  if (fila) alternarColores(fila);
+});
+el.tablaModelos.addEventListener("keydown", (evento) => {
+  const fila = evento.target.closest(".fila-modelo");
+  if (fila && (evento.key === "Enter" || evento.key === " ")) {
+    evento.preventDefault();
+    alternarColores(fila);
+  }
+});
 
 // ============================================================
 // 9. NAVEGACIÓN ENTRE VISTAS

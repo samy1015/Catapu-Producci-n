@@ -34,11 +34,12 @@ const COLUMNAS_PANEL = [
   "CHEQUEO",
   "MODELO",
   "CAPACIDAD",
+  "COLOR",
   "LOTE",
 ];
 const COLUMNAS_CON_FECHA = ["FECHA DE PULIDO", "FECHA CAMBIO BATERIA", "FECHA DE CHEQUEO"];
 
-const CACHE_PREFIJO = "prod_v1";
+const CACHE_PREFIJO = "prod_v2"; // súbelo si cambias COLUMNAS_PANEL, para no servir una caché con columnas viejas
 const CACHE_TTL_SEG = 900;  // 15 min; el disparador la renueva cada 10
 const CACHE_TAM_TROZO = 40000; // cada valor de caché admite hasta 100 KB
 

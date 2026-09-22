@@ -652,3 +652,57 @@ main {
     grid-template-columns: 1fr;
   }
 }
+
+/* Modelos con colores desplegables */
+.fila-modelo {
+  cursor: pointer;
+}
+
+.fila-modelo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.chevron {
+  display: inline-block;
+  width: 1.1em;
+  color: var(--text-dim);
+  transition: transform 0.15s ease;
+}
+
+.fila-modelo[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.fila-colores td {
+  background: var(--panel-alt);
+  padding: 10px 8px 12px 28px;
+}
+
+.lista-colores {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.lista-colores li {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.lista-colores strong {
+  color: var(--accent);
+  margin-left: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
