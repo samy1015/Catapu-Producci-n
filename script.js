@@ -394,7 +394,8 @@ function aplicarFiltrosYRenderizar() {
 
   renderizarRanking(el.rankingBateria, contarPorCampo(registrosBateria, "tecnicoBateria"));
   renderizarRanking(el.rankingChequeo, contarPorCampo(registrosChequeo, "tecnicoChequeo"));
-  renderizarTablaModelos(contarModelos(registrosConActividad));
+  // Solo equipos que tuvieron chequeo en el rango (no cualquier actividad).
+  renderizarTablaModelos(contarModelos(registrosChequeo));
 }
 
 function renderizarHero({ total, baterias, chequeos, pulidos }) {

@@ -142,9 +142,11 @@
           </td>
           <td>${escaparHtml(f.ticket)}</td>
           <td>${escaparHtml(formatearClave(f.fecha))}</td>
+          <td>${escaparHtml(f.nombre || "—")}</td>
+          <td>${escaparHtml(f.correo || "—")}</td>
+          <td>${escaparHtml(f.documento || "—")}</td>
+          <td>${escaparHtml(f.telefono || "—")}</td>
           <td>${escaparHtml(f.modelo || "—")}</td>
-          <td>${escaparHtml(f.capacidad || "—")}</td>
-          <td>${escaparHtml(f.color || "—")}</td>
           <td class="col-imei">${escaparHtml(f.imei || "—")}</td>
         </tr>`
       )
@@ -153,7 +155,11 @@
     return `
       <table class="data-table">
         <thead>
-          <tr><th>Estado</th><th>Ticket</th><th>Fecha</th><th>Modelo</th><th>Capacidad</th><th>Color</th><th>IMEI</th></tr>
+          <tr>
+            <th>Estado</th><th>Ticket</th><th>Fecha</th>
+            <th>Nombre</th><th>Correo</th><th>Documento</th><th>Teléfono</th>
+            <th>Modelo</th><th>IMEI</th>
+          </tr>
         </thead>
         <tbody>${filasHtml}</tbody>
       </table>`;

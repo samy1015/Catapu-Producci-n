@@ -6,9 +6,8 @@
 // reparaciones.gs). Créalo desde script.google.com > Proyecto nuevo.
 //
 // Qué hace: junta los tickets de tipo "Garantía" de las 3 tiendas de
-// RepairDesk (vía su API pública) y, para cada uno, busca su IMEI en
-// el resumen de Producción (apps-script/produccion.gs) para completar
-// capacidad y color, que RepairDesk no guarda.
+// RepairDesk (vía su API pública), con los datos del cliente y del
+// equipo que trae cada ticket.
 //
 // SOLO LECTURA: este script nunca crea, modifica ni borra tickets en
 // RepairDesk. Únicamente hace peticiones GET.
@@ -44,12 +43,6 @@ const TIENDAS = {
 const REPAIRDESK_BASE = "https://api.repairdesk.co/api/web/v1/tickets";
 const ZONA_HORARIA = "America/Lima";
 
-// Endpoint ya existente de Producción: su resumen (sin parámetros)
-// ahora incluye IMEI, así que con una sola llamada armamos el cruce
-// modelo/capacidad/color por IMEI, sin tocar la spreadsheet directamente.
-const URL_PRODUCCION =
-  "https://script.google.com/macros/s/AKfycbxIRRSKngAHHfxOMtb-bNCDnWzPiU353fCy0-PFVkWXftGAM6Mkw1tcwEWrclyKgag9pg/exec";
-
 // Un ticket se considera "de garantía" si el nombre de su producto o
 // servicio contiene esta palabra (insensible a mayúsculas). Usamos
 // repairProdItems (lo que el técnico elige al crear el ticket, ej.
@@ -58,7 +51,7 @@ const URL_PRODUCCION =
 // nombre — solo el detalle de UN ticket a la vez lo trae completo.
 const PATRON_GARANTIA = /garant/i;
 
-const CACHE_PREFIJO = "gar_v1";
+const CACHE_PREFIJO = "gar_v2"; // v2: se quitó el cruce con Producción (capacidad/color)
 const CACHE_TTL_SEG = 600; // 10 min: cubre casi todo el tráfico normal sin dejar los datos muy viejos
 const CACHE_TAM_TROZO = 40000;
 
@@ -114,9 +107,10 @@ function obtenerGarantiasJson(desde, hasta, forzar) {
 // terminar, una más a Producción — si esa última se topaba con la
 // caché de Producción fría (~40 s en leer toda la hoja), la suma total
 // podía superar lo que tolera la infraestructura de Google delante de
-// Apps Script, y la petición completa fallaba en vez de demorar.
-// Ahora las 4 (las 3 tiendas + Producción) salen JUNTAS con fetchAll,
-// así el tiempo total es el de la más lenta, no la suma de las 4.
+// Apps Script, y la petición completa fallaba en vez de demorar. Ya no
+// se consulta a Producción (el panel de Garantías no muestra capacidad
+// ni color), pero las 3 tiendas se siguen pidiendo JUNTAS con fetchAll,
+// así el tiempo total es el de la más lenta, no la suma de las 3.
 function construirGarantiasJson(desde, hasta) {
   const inicio = Date.now();
   const desdeUnix = Math.floor(new Date(desde + "T00:00:00").getTime() / 1000);
@@ -125,8 +119,8 @@ function construirGarantiasJson(desde, hasta) {
   const errores = [];
 
   // Armamos la lista de peticiones: una por tienda (solo la primera
-  // página) + una a Producción. Guardamos aparte la apiKey de cada
-  // tienda, para poder seguir pidiendo páginas extra más abajo si hiciera falta.
+  // página). Guardamos aparte la apiKey de cada tienda, para poder
+  // seguir pidiendo páginas extra más abajo si hiciera falta.
   const peticiones = [];
   const apiKeys = {};
   nombresTiendas.forEach(tienda => {
@@ -136,30 +130,19 @@ function construirGarantiasJson(desde, hasta) {
       errores.push(tienda + ": falta configurar la propiedad " + TIENDAS[tienda]);
       return;
     }
-    peticiones.push({ tipo: "tienda", tienda: tienda, url: urlTicketsRepairDesk(apiKey, desdeUnix, hastaUnix, 1) });
+    peticiones.push({ tienda: tienda, url: urlTicketsRepairDesk(apiKey, desdeUnix, hastaUnix, 1) });
   });
-  peticiones.push({ tipo: "produccion", url: URL_PRODUCCION });
 
   const respuestas = UrlFetchApp.fetchAll(
     peticiones.map(p => ({ url: p.url, method: "get", muteHttpExceptions: true }))
   );
 
   let filas = [];
-  let mapaImei = {};
   const pendientesPaginacion = []; // tiendas cuya página 1 avisó que hay más
 
   peticiones.forEach((p, i) => {
-    const respuesta = respuestas[i];
-    if (p.tipo === "produccion") {
-      try {
-        mapaImei = procesarRespuestaProduccion(respuesta);
-      } catch (err) {
-        errores.push("Producción (cruce de capacidad/color): " + (err.message || err));
-      }
-      return;
-    }
     try {
-      const resultado = procesarPaginaTienda(p.tienda, respuesta);
+      const resultado = procesarPaginaTienda(p.tienda, respuestas[i]);
       resultado.filas.forEach(f => filas.push(f));
       if (resultado.siguientePagina) pendientesPaginacion.push(p.tienda);
     } catch (err) {
@@ -180,13 +163,7 @@ function construirGarantiasJson(desde, hasta) {
 
   filas = quitarDuplicadosEntreSucursales(filas);
 
-  filas.forEach(fila => {
-    const extra = mapaImei[fila.imei];
-    if (extra) {
-      fila.capacidad = extra.capacidad;
-      fila.color = extra.color;
-    }
-  });
+  agregarDocumentos(filas, apiKeys, errores);
 
   filas.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
   // idInterno y modificado ya cumplieron su función (deduplicar); no
@@ -246,9 +223,15 @@ function procesarPaginaTienda(tienda, respuesta) {
         tienda: tienda,
         ticket: ticket.summary.order_id,
         fecha: Utilities.formatDate(new Date(ticket.summary.created_date * 1000), ZONA_HORARIA, "yyyy-MM-dd"),
+        // Nombre, correo y teléfono vienen gratis en esta misma
+        // respuesta. El documento (DNI/RUC/CE/Pasaporte) NO — RepairDesk
+        // solo lo entrega en el detalle de cada ticket, por eso se
+        // completa aparte, en agregarDocumentos().
+        nombre: (ticket.summary.customer && ticket.summary.customer.fullName) || "",
+        correo: (ticket.summary.customer && ticket.summary.customer.email) || "",
+        telefono: (ticket.summary.customer && (ticket.summary.customer.mobile || ticket.summary.customer.phone)) || "",
+        documento: "",
         modelo: (dispositivo.device && dispositivo.device.name) || "",
-        capacidad: "", // se completa más abajo si el IMEI aparece en Producción
-        color: "",
         estado: (dispositivo.status && dispositivo.status.name) || "",
         imei: dispositivo.imei || "",
       });
@@ -312,38 +295,67 @@ function quitarDuplicadosEntreSucursales(filas) {
 }
 
 // ------------------------------------------------------------
-// Cruce con Producción (por IMEI)
+// Documento del cliente (DNI / RUC / CE / Pasaporte)
 // ------------------------------------------------------------
-// Recibe la respuesta ya obtenida (viene del mismo fetchAll que las
-// tiendas, no de un fetch aparte) y arma el mapa IMEI -> datos.
-function procesarRespuestaProduccion(respuesta) {
-  if (respuesta.getResponseCode() !== 200) {
-    // Incluimos el inicio del cuerpo de la respuesta: así, si vuelve a
-    // fallar, el mensaje de error (visible en el JSON del panel) ya trae
-    // la pista, sin tener que entrar al registro de ejecución.
-    const cuerpo = respuesta.getContentText().slice(0, 200);
-    throw new Error("Producción respondió " + respuesta.getResponseCode() + ": " + cuerpo);
+// RepairDesk solo entrega este dato en el DETALLE de un ticket (no en
+// el listado usado arriba), así que hay que pedirlo aparte: una
+// petición más por cada ticket de garantía, en paralelo con fetchAll
+// (no una por una). Con un rango de fechas muy amplio esto puede ser
+// bastante peticiones, así que hay un tope de seguridad.
+const MAX_DOCUMENTOS = 150;
+
+function agregarDocumentos(filas, apiKeys, errores) {
+  if (filas.length === 0) return;
+
+  let paraPedir = filas;
+  if (filas.length > MAX_DOCUMENTOS) {
+    errores.push(
+      "Documento: el rango tiene " + filas.length + " tickets; solo se pidió para los primeros " +
+      MAX_DOCUMENTOS + " (achica el rango de fechas para verlos todos)."
+    );
+    paraPedir = filas.slice(0, MAX_DOCUMENTOS);
   }
-  const paquete = JSON.parse(respuesta.getContentText());
-  if (paquete.error) throw new Error(paquete.error);
 
-  const iImei = paquete.columnas.indexOf("IMEI");
-  const iModelo = paquete.columnas.indexOf("MODELO");
-  const iCapacidad = paquete.columnas.indexOf("CAPACIDAD");
-  const iColor = paquete.columnas.indexOf("COLOR");
-  if (iImei === -1) throw new Error("Producción no está enviando IMEI (publica la última versión de produccion.gs).");
+  const solicitudes = paraPedir.map(fila => ({
+    url: REPAIRDESK_BASE + "/" + fila.idInterno + "?api_key=" + encodeURIComponent(apiKeys[fila.tienda]),
+    method: "get",
+    muteHttpExceptions: true,
+  }));
 
-  const mapa = {};
-  paquete.filas.forEach(fila => {
-    const imei = fila[iImei];
-    if (!imei) return;
-    mapa[imei] = {
-      modelo: fila[iModelo] || "",
-      capacidad: fila[iCapacidad] || "",
-      color: fila[iColor] || "",
-    };
+  let respuestas;
+  try {
+    respuestas = UrlFetchApp.fetchAll(solicitudes);
+  } catch (err) {
+    errores.push("Documento: no se pudo consultar el detalle de los tickets (" + (err.message || err) + ").");
+    return;
+  }
+
+  paraPedir.forEach((fila, i) => {
+    try {
+      fila.documento = extraerDocumento(respuestas[i]);
+    } catch (err) {
+      // Un ticket individual que falle no debe tumbar a los demás.
+    }
   });
-  return mapa;
+}
+
+function extraerDocumento(respuesta) {
+  if (respuesta.getResponseCode() !== 200) return "";
+  const cuerpo = JSON.parse(respuesta.getContentText());
+  if (!cuerpo.success) return "";
+
+  const camposCliente = (cuerpo.data && cuerpo.data.summary && cuerpo.data.summary.customer &&
+    cuerpo.data.summary.customer.custom_fields) || [];
+
+  const porNombre = nombre => {
+    const campo = camposCliente.find(c => c.name === nombre);
+    return campo && campo.value ? String(campo.value).trim() : "";
+  };
+
+  // "dnicepasaporte" es el documento de identidad de la persona. Si el
+  // ticket es de una empresa (con RUC) y ese campo está vacío, mostramos
+  // el RUC en su lugar, para que la columna nunca quede vacía sin razón.
+  return porNombre("dnicepasaporte") || (porNombre("ruc") ? "RUC " + porNombre("ruc") : "");
 }
 
 // ------------------------------------------------------------
