@@ -59,7 +59,7 @@ const URL_PRODUCCION =
 const PATRON_GARANTIA = /garant/i;
 
 const CACHE_PREFIJO = "gar_v1";
-const CACHE_TTL_SEG = 300; // 5 min: los tickets de garantía son del día, conviene que esté fresco
+const CACHE_TTL_SEG = 600; // 10 min: cubre casi todo el tráfico normal sin dejar los datos muy viejos
 const CACHE_TAM_TROZO = 40000;
 
 function doGet(e) {
@@ -110,34 +110,76 @@ function obtenerGarantiasJson(desde, hasta, forzar) {
   return json;
 }
 
+// Antes esto hacía 3 llamadas a RepairDesk UNA TRAS OTRA y, recién al
+// terminar, una más a Producción — si esa última se topaba con la
+// caché de Producción fría (~40 s en leer toda la hoja), la suma total
+// podía superar lo que tolera la infraestructura de Google delante de
+// Apps Script, y la petición completa fallaba en vez de demorar.
+// Ahora las 4 (las 3 tiendas + Producción) salen JUNTAS con fetchAll,
+// así el tiempo total es el de la más lenta, no la suma de las 4.
 function construirGarantiasJson(desde, hasta) {
   const inicio = Date.now();
   const desdeUnix = Math.floor(new Date(desde + "T00:00:00").getTime() / 1000);
   const hastaUnix = Math.floor(new Date(hasta + "T23:59:59").getTime() / 1000);
-
-  let filas = [];
+  const nombresTiendas = Object.keys(TIENDAS);
   const errores = [];
 
-  Object.keys(TIENDAS).forEach(tienda => {
+  // Armamos la lista de peticiones: una por tienda (solo la primera
+  // página) + una a Producción. Guardamos aparte la apiKey de cada
+  // tienda, para poder seguir pidiendo páginas extra más abajo si hiciera falta.
+  const peticiones = [];
+  const apiKeys = {};
+  nombresTiendas.forEach(tienda => {
+    const apiKey = PropertiesService.getScriptProperties().getProperty(TIENDAS[tienda]);
+    apiKeys[tienda] = apiKey;
+    if (!apiKey) {
+      errores.push(tienda + ": falta configurar la propiedad " + TIENDAS[tienda]);
+      return;
+    }
+    peticiones.push({ tipo: "tienda", tienda: tienda, url: urlTicketsRepairDesk(apiKey, desdeUnix, hastaUnix, 1) });
+  });
+  peticiones.push({ tipo: "produccion", url: URL_PRODUCCION });
+
+  const respuestas = UrlFetchApp.fetchAll(
+    peticiones.map(p => ({ url: p.url, method: "get", muteHttpExceptions: true }))
+  );
+
+  let filas = [];
+  let mapaImei = {};
+  const pendientesPaginacion = []; // tiendas cuya página 1 avisó que hay más
+
+  peticiones.forEach((p, i) => {
+    const respuesta = respuestas[i];
+    if (p.tipo === "produccion") {
+      try {
+        mapaImei = procesarRespuestaProduccion(respuesta);
+      } catch (err) {
+        errores.push("Producción (cruce de capacidad/color): " + (err.message || err));
+      }
+      return;
+    }
     try {
-      const apiKey = PropertiesService.getScriptProperties().getProperty(TIENDAS[tienda]);
-      if (!apiKey) throw new Error("Falta configurar la propiedad " + TIENDAS[tienda]);
-      obtenerGarantiasDeTienda(tienda, apiKey, desdeUnix, hastaUnix).forEach(f => filas.push(f));
+      const resultado = procesarPaginaTienda(p.tienda, respuesta);
+      resultado.filas.forEach(f => filas.push(f));
+      if (resultado.siguientePagina) pendientesPaginacion.push(p.tienda);
     } catch (err) {
-      errores.push(tienda + ": " + (err.message || err));
+      errores.push(p.tienda + ": " + (err.message || err));
+    }
+  });
+
+  // Caso poco común: una tienda tuvo más de 100 tickets de garantía en
+  // el rango pedido. Pedimos el resto de páginas, tienda por tienda
+  // (esto sí es secuencial, pero solo pasa con rangos amplios).
+  pendientesPaginacion.forEach(tienda => {
+    try {
+      obtenerRestoDePaginas(tienda, apiKeys[tienda], desdeUnix, hastaUnix).forEach(f => filas.push(f));
+    } catch (err) {
+      errores.push(tienda + " (páginas adicionales): " + (err.message || err));
     }
   });
 
   filas = quitarDuplicadosEntreSucursales(filas);
 
-  // Cruce con Producción: una sola llamada trae TODO el resumen (con
-  // caché propia de ese script), y aquí armamos un mapa IMEI -> datos.
-  let mapaImei = {};
-  try {
-    mapaImei = obtenerMapaImeiDesdeProduccion();
-  } catch (err) {
-    errores.push("Producción (cruce de capacidad/color): " + (err.message || err));
-  }
   filas.forEach(fila => {
     const extra = mapaImei[fila.imei];
     if (extra) {
@@ -152,7 +194,7 @@ function construirGarantiasJson(desde, hasta) {
   filas.forEach(f => { delete f.idInterno; delete f.modificado; });
 
   return JSON.stringify({
-    tiendas: Object.keys(TIENDAS),
+    tiendas: nombresTiendas,
     filas: filas,
     generado: new Date().toISOString(),
     errores: errores, // el panel las muestra como aviso, sin bloquear lo que sí llegó
@@ -161,58 +203,75 @@ function construirGarantiasJson(desde, hasta) {
 }
 
 // ------------------------------------------------------------
-// RepairDesk (una tienda). Solo GET — nunca escribe nada.
+// RepairDesk. Solo GET — nunca escribe nada.
 // ------------------------------------------------------------
-function obtenerGarantiasDeTienda(tienda, apiKey, desdeUnix, hastaUnix) {
+function urlTicketsRepairDesk(apiKey, desdeUnix, hastaUnix, pagina) {
+  return REPAIRDESK_BASE +
+    "?api_key=" + encodeURIComponent(apiKey) +
+    "&from_date=" + desdeUnix +
+    "&to_date=" + hastaUnix +
+    "&pagesize=100&page=" + pagina;
+}
+
+// Convierte la respuesta ya obtenida (por fetchAll o por un fetch
+// suelto) en las filas de garantía de esa página, y dice si hay que
+// pedir la siguiente.
+function procesarPaginaTienda(tienda, respuesta) {
+  if (respuesta.getResponseCode() !== 200) {
+    throw new Error("RepairDesk respondió " + respuesta.getResponseCode());
+  }
+  const cuerpo = JSON.parse(respuesta.getContentText());
+  if (!cuerpo.success) {
+    // RepairDesk responde así cuando el rango simplemente no tiene
+    // tickets — no es un error, es "cero resultados".
+    if (cuerpo.statusCode === 100 || cuerpo.message === "No Result Found") {
+      return { filas: [], siguientePagina: false };
+    }
+    throw new Error(cuerpo.message || "Respuesta sin éxito");
+  }
+
   const filas = [];
-  const MAX_PAGINAS = 20; // tope de seguridad: 20 × 100 = 2000 tickets en el rango
-  let pagina = 1;
+  (cuerpo.data.ticketData || []).forEach(ticket => {
+    (ticket.devices || []).forEach(dispositivo => {
+      if (!esTicketDeGarantia(dispositivo)) return;
 
-  while (pagina <= MAX_PAGINAS) {
-    const url = REPAIRDESK_BASE +
-      "?api_key=" + encodeURIComponent(apiKey) +
-      "&from_date=" + desdeUnix +
-      "&to_date=" + hastaUnix +
-      "&pagesize=100&page=" + pagina;
-
-    const respuesta = UrlFetchApp.fetch(url, { method: "get", muteHttpExceptions: true });
-    if (respuesta.getResponseCode() !== 200) {
-      throw new Error("RepairDesk respondió " + respuesta.getResponseCode());
-    }
-    const cuerpo = JSON.parse(respuesta.getContentText());
-    if (!cuerpo.success) {
-      // RepairDesk responde así cuando el rango simplemente no tiene
-      // tickets — no es un error, es "cero resultados".
-      if (cuerpo.statusCode === 100 || cuerpo.message === "No Result Found") break;
-      throw new Error(cuerpo.message || "Respuesta sin éxito");
-    }
-
-    (cuerpo.data.ticketData || []).forEach(ticket => {
-      (ticket.devices || []).forEach(dispositivo => {
-        if (!esTicketDeGarantia(dispositivo)) return;
-
-        filas.push({
-          // El id interno del ticket es único en TODA la cuenta (no se
-          // repite por tienda, a diferencia de order_id "T-123", que sí
-          // es una numeración propia de cada tienda). Lo usamos abajo
-          // para detectar el mismo ticket visto desde dos tiendas (por
-          // ejemplo un traslado "In-house transfer").
-          idInterno: ticket.summary.id,
-          modificado: ticket.summary.modified_on || 0,
-          tienda: tienda,
-          ticket: ticket.summary.order_id,
-          fecha: Utilities.formatDate(new Date(ticket.summary.created_date * 1000), ZONA_HORARIA, "yyyy-MM-dd"),
-          modelo: (dispositivo.device && dispositivo.device.name) || "",
-          capacidad: "", // se completa más abajo si el IMEI aparece en Producción
-          color: "",
-          estado: (dispositivo.status && dispositivo.status.name) || "",
-          imei: dispositivo.imei || "",
-        });
+      filas.push({
+        // El id interno del ticket es único en TODA la cuenta (no se
+        // repite por tienda, a diferencia de order_id "T-123", que sí
+        // es una numeración propia de cada tienda). Lo usamos abajo
+        // para detectar el mismo ticket visto desde dos tiendas (por
+        // ejemplo un traslado "In-house transfer").
+        idInterno: ticket.summary.id,
+        modificado: ticket.summary.modified_on || 0,
+        tienda: tienda,
+        ticket: ticket.summary.order_id,
+        fecha: Utilities.formatDate(new Date(ticket.summary.created_date * 1000), ZONA_HORARIA, "yyyy-MM-dd"),
+        modelo: (dispositivo.device && dispositivo.device.name) || "",
+        capacidad: "", // se completa más abajo si el IMEI aparece en Producción
+        color: "",
+        estado: (dispositivo.status && dispositivo.status.name) || "",
+        imei: dispositivo.imei || "",
       });
     });
+  });
 
-    const paginacion = cuerpo.data.pagination;
-    if (!paginacion || !paginacion.next_page_exist) break;
+  const paginacion = cuerpo.data.pagination;
+  return { filas: filas, siguientePagina: !!(paginacion && paginacion.next_page_exist) };
+}
+
+// Solo se llama cuando la página 1 de una tienda avisó que hay más
+// (caso raro con rangos amplios). A partir de aquí sí es secuencial.
+function obtenerRestoDePaginas(tienda, apiKey, desdeUnix, hastaUnix) {
+  const filas = [];
+  const MAX_PAGINAS = 20; // tope de seguridad: 20 × 100 = 2000 tickets en el rango
+  let pagina = 2;
+
+  while (pagina <= MAX_PAGINAS) {
+    const url = urlTicketsRepairDesk(apiKey, desdeUnix, hastaUnix, pagina);
+    const respuesta = UrlFetchApp.fetch(url, { method: "get", muteHttpExceptions: true });
+    const resultado = procesarPaginaTienda(tienda, respuesta);
+    resultado.filas.forEach(f => filas.push(f));
+    if (!resultado.siguientePagina) break;
     pagina++;
   }
 
@@ -255,12 +314,9 @@ function quitarDuplicadosEntreSucursales(filas) {
 // ------------------------------------------------------------
 // Cruce con Producción (por IMEI)
 // ------------------------------------------------------------
-function obtenerMapaImeiDesdeProduccion() {
-  const respuesta = UrlFetchApp.fetch(URL_PRODUCCION, {
-    method: "get",
-    muteHttpExceptions: true,
-    followRedirects: true,
-  });
+// Recibe la respuesta ya obtenida (viene del mismo fetchAll que las
+// tiendas, no de un fetch aparte) y arma el mapa IMEI -> datos.
+function procesarRespuestaProduccion(respuesta) {
   if (respuesta.getResponseCode() !== 200) {
     // Incluimos el inicio del cuerpo de la respuesta: así, si vuelve a
     // fallar, el mensaje de error (visible en el JSON del panel) ya trae

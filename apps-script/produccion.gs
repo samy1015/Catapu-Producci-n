@@ -43,7 +43,10 @@ const COLUMNAS_CON_FECHA = ["FECHA DE PULIDO", "FECHA CAMBIO BATERIA", "FECHA DE
 const CACHE_PREFIJO = "prod_v3"; // súbelo si cambias COLUMNAS_PANEL, para no servir una caché con columnas viejas
 // v3: se agregó IMEI, para que Garantías (apps-script/garantias.gs) pueda
 // cruzar sus tickets de RepairDesk con el modelo/capacidad/color de aquí.
-const CACHE_TTL_SEG = 900;  // 15 min; el disparador la renueva cada 10
+const CACHE_TTL_SEG = 1500; // 25 min; el disparador la renueva cada 10 — el margen extra
+// evita que la caché quede fría si algún disparo del trigger se demora
+// o falla (Garantías depende de este caché para cruzar por IMEI, así
+// que un caché frío ahí también hace lenta la carga de Garantías).
 const CACHE_TAM_TROZO = 40000; // cada valor de caché admite hasta 100 KB
 
 function doGet(e) {
