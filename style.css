@@ -833,3 +833,102 @@ main {
   color: var(--text-dim);
   font-style: italic;
 }
+
+/* ============================================
+   FILTRO DE ESTADO (Garantías) — uno por tabla, dentro del propio
+   encabezado "Estado", independiente entre tiendas
+   ============================================ */
+.th-estado {
+  white-space: nowrap;
+}
+
+.filtro-estado-col {
+  position: relative;
+  display: inline-block;
+  margin-left: 4px;
+}
+
+.filtro-estado-btn-mini {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px;
+  vertical-align: middle;
+}
+
+.filtro-estado-btn-mini:hover {
+  color: var(--text);
+}
+
+.filtro-estado-btn-mini--activo {
+  color: var(--accent);
+}
+
+.filtro-estado-btn-mini:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.filtro-estado-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 240px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* Este menú cuelga de un <th>, que en .data-table usa font-display en
+     negrita — se resetea, para que los estados se lean como texto normal. */
+  font-family: var(--font-mono);
+  font-weight: 400;
+  text-align: left;
+}
+
+.filtro-estado-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 3px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.filtro-estado-item:hover {
+  background: var(--panel-alt);
+}
+
+.filtro-estado-item input {
+  accent-color: var(--accent);
+}
+
+.filtro-estado-acciones {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.filtro-estado-acciones button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.filtro-estado-acciones button:hover {
+  text-decoration: underline;
+}

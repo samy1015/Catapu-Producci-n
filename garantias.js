@@ -25,8 +25,20 @@
     ultima: document.getElementById("gar-ultima-actualizacion"),
   };
 
-  let filasActuales = []; // lo último cargado, sin filtrar por el buscador de IMEI
+  let filasActuales = []; // lo último cargado, sin filtrar por el buscador de IMEI ni los de estado
   let tiendasActuales = [];
+
+  // Cada tienda filtra su propio estado, sin afectar a las otras. Como
+  // RepairDesk no tiene una lista fija de estados (cada tienda puede
+  // tener los suyos), el filtro se arma con lo que traiga cada carga.
+  // Guardamos los que el usuario DESMARCÓ (por tienda) — así, un estado
+  // nuevo que aparezca después sigue visible por defecto, en vez de
+  // quedar oculto sin que nadie lo haya pedido.
+  const estadosOcultosPorTienda = {}; // { "Miraflores": Set(...), ... }
+
+  // Solo un desplegable de estado abierto a la vez (el de la tienda
+  // indicada aquí, o ninguno).
+  let tiendaMenuAbierta = null;
 
   function claveDeHoy() {
     const hoy = new Date();
@@ -81,6 +93,7 @@
 
       filasActuales = datos.filas;
       tiendasActuales = datos.tiendas;
+      tiendaMenuAbierta = null;
       ui.status.textContent = `${datos.filas.length} tickets de garantía en el rango.`;
       ui.ultima.textContent = "Última actualización: " + new Date().toLocaleString("es-PE");
 
@@ -89,7 +102,7 @@
         ui.avisoErrores.textContent = "Algunas tiendas no se pudieron consultar: " + datos.errores.join(" · ");
       }
 
-      aplicarBusquedaYRenderizar();
+      renderizarTodo();
     } catch (error) {
       console.error(error);
       ui.status.textContent = "No se pudieron cargar los datos de garantías. (" + error.message + ")";
@@ -100,20 +113,31 @@
   }
 
   // ----------------------------------------------------------
-  // Búsqueda por IMEI (filtra lo ya cargado, sin volver a pedir datos)
+  // Búsqueda por IMEI (aplica a las 3 tiendas por igual). El filtro de
+  // estado, en cambio, es independiente por tienda — se aplica dentro
+  // de pintar(), no aquí.
   // ----------------------------------------------------------
-  function aplicarBusquedaYRenderizar() {
+  function renderizarTodo() {
     const busqueda = ui.buscador.value.trim().replace(/\s+/g, "");
-    const filtradas = busqueda
-      ? filasActuales.filter((f) => f.imei.includes(busqueda))
-      : filasActuales;
+    const filtradas = busqueda ? filasActuales.filter((f) => f.imei.includes(busqueda)) : filasActuales;
     pintar(tiendasActuales, filtradas);
+  }
+
+  function estadosDeTienda(tienda) {
+    // Ignora la búsqueda por IMEI a propósito: las opciones del filtro
+    // no deben aparecer/desaparecer mientras alguien escribe en el buscador.
+    return [...new Set(filasActuales.filter((f) => f.tienda === tienda).map((f) => f.estado).filter(Boolean))].sort();
+  }
+
+  function ocultosDeTienda(tienda) {
+    if (!estadosOcultosPorTienda[tienda]) estadosOcultosPorTienda[tienda] = new Set();
+    return estadosOcultosPorTienda[tienda];
   }
 
   // ----------------------------------------------------------
   // Render: un bloque por tienda, con sus tickets de garantía
   // ----------------------------------------------------------
-  function pintar(tiendas, filas) {
+  function pintar(tiendas, filasBuscadas) {
     if (tiendas.length === 0) {
       ui.tiendas.innerHTML = '<p class="ranking-empty">Sin datos en este rango.</p>';
       return;
@@ -121,17 +145,20 @@
 
     ui.tiendas.innerHTML = tiendas
       .map((tienda) => {
-        const filasTienda = filas.filter((f) => f.tienda === tienda);
+        const ocultos = ocultosDeTienda(tienda);
+        const filasTienda = filasBuscadas.filter((f) => f.tienda === tienda && !ocultos.has(f.estado));
         return `
         <section class="panel panel-wide panel-garantia">
           <h2 class="panel-title">${escaparHtml(tienda)} <span class="panel-title-count">(${filasTienda.length})</span></h2>
-          ${filasTienda.length ? renderizarTablaGarantias(filasTienda) : '<p class="ranking-empty">Sin garantías en este rango.</p>'}
+          ${filasTienda.length || estadosDeTienda(tienda).length
+            ? renderizarTablaGarantias(tienda, filasTienda)
+            : '<p class="ranking-empty">Sin garantías en este rango.</p>'}
         </section>`;
       })
       .join("");
   }
 
-  function renderizarTablaGarantias(filas) {
+  function renderizarTablaGarantias(tienda, filas) {
     const filasHtml = filas
       .map(
         (f) => `
@@ -156,13 +183,55 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Estado</th><th>Ticket</th><th>Fecha</th>
+            <th class="th-estado">Estado ${renderizarFiltroEstado(tienda)}</th>
+            <th>Ticket</th><th>Fecha</th>
             <th>Nombre</th><th>Correo</th><th>Documento</th><th>Teléfono</th>
             <th>Modelo</th><th>IMEI</th>
           </tr>
         </thead>
-        <tbody>${filasHtml}</tbody>
+        <tbody>${filas.length ? filasHtml : '<tr><td colspan="9" class="ranking-empty">Ningún ticket coincide con el filtro de estado.</td></tr>'}</tbody>
       </table>`;
+  }
+
+  // Ícono + desplegable de checkboxes, dentro del propio encabezado
+  // "Estado" de la tabla de esa tienda.
+  function renderizarFiltroEstado(tienda) {
+    const estados = estadosDeTienda(tienda);
+    if (estados.length === 0) return "";
+
+    const ocultos = ocultosDeTienda(tienda);
+    const activo = ocultos.size > 0;
+    const abierto = tiendaMenuAbierta === tienda;
+    const tiendaAttr = escaparHtml(tienda);
+
+    const items = estados
+      .map(
+        (estado, i) => `
+        <label class="filtro-estado-item">
+          <input type="checkbox" data-indice="${i}" ${ocultos.has(estado) ? "" : "checked"} />
+          <span>${escaparHtml(estado)}</span>
+        </label>`
+      )
+      .join("");
+
+    return `
+      <span class="filtro-estado-col">
+        <button
+          type="button"
+          class="filtro-estado-btn-mini ${activo ? "filtro-estado-btn-mini--activo" : ""}"
+          data-tienda="${tiendaAttr}"
+          title="Filtrar por estado"
+          aria-haspopup="true"
+          aria-expanded="${abierto}"
+        >▽</button>
+        <div class="filtro-estado-menu" data-tienda="${tiendaAttr}" ${abierto ? "" : "hidden"}>
+          ${items}
+          <div class="filtro-estado-acciones" data-tienda="${tiendaAttr}">
+            <button type="button" data-accion="todos">Marcar todos</button>
+            <button type="button" data-accion="ninguno">Desmarcar todos</button>
+          </div>
+        </div>
+      </span>`;
   }
 
   function renderizarTraslado(trasladoDesde) {
@@ -191,7 +260,61 @@
   ui.btn.addEventListener("click", () => cargarGarantias(true));
   ui.desde.addEventListener("change", () => cargarGarantias(false));
   ui.hasta.addEventListener("change", () => cargarGarantias(false));
-  ui.buscador.addEventListener("input", aplicarBusquedaYRenderizar);
+  ui.buscador.addEventListener("input", renderizarTodo);
+
+  // Delegado en ui.tiendas: el contenido se reconstruye por completo en
+  // cada pintar(), así que no tiene sentido enganchar listeners a
+  // elementos que van a desaparecer.
+  ui.tiendas.addEventListener("click", (evento) => {
+    // Cualquier clic dentro del filtro (botón, checkbox, "todos"/"ninguno")
+    // no debe llegar al listener de "clic afuera" de document — si no, el
+    // menú se cerraría solo justo al marcar una casilla, porque para
+    // entonces renderizarTodo() ya reemplazó el HTML y el nodo clicado
+    // queda desconectado del árbol.
+    if (!evento.target.closest(".filtro-estado-col")) return;
+    evento.stopPropagation();
+
+    const boton = evento.target.closest(".filtro-estado-btn-mini");
+    if (boton) {
+      const tienda = boton.dataset.tienda;
+      tiendaMenuAbierta = tiendaMenuAbierta === tienda ? null : tienda;
+      renderizarTodo();
+      return;
+    }
+
+    const accion = evento.target.closest("[data-accion]");
+    if (accion) {
+      const tienda = accion.closest("[data-tienda]").dataset.tienda;
+      const ocultos = ocultosDeTienda(tienda);
+      if (accion.dataset.accion === "todos") ocultos.clear();
+      else estadosDeTienda(tienda).forEach((estado) => ocultos.add(estado));
+      renderizarTodo();
+    }
+  });
+
+  ui.tiendas.addEventListener("change", (evento) => {
+    const casilla = evento.target.closest(".filtro-estado-item input");
+    if (!casilla) return;
+    const tienda = casilla.closest(".filtro-estado-menu").dataset.tienda;
+    const estado = estadosDeTienda(tienda)[Number(casilla.dataset.indice)];
+    const ocultos = ocultosDeTienda(tienda);
+    if (casilla.checked) ocultos.delete(estado);
+    else ocultos.add(estado);
+    renderizarTodo();
+  });
+
+  document.addEventListener("click", (evento) => {
+    if (tiendaMenuAbierta && !evento.target.closest(".filtro-estado-col")) {
+      tiendaMenuAbierta = null;
+      renderizarTodo();
+    }
+  });
+  document.addEventListener("keydown", (evento) => {
+    if (evento.key === "Escape" && tiendaMenuAbierta) {
+      tiendaMenuAbierta = null;
+      renderizarTodo();
+    }
+  });
 
   cargadoresDeVista.garantias = () => cargarGarantias(false);
 })();
