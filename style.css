@@ -873,9 +873,12 @@ main {
 }
 
 .filtro-estado-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+  /* fixed (no absolute): el panel de la tabla tiene overflow-x: auto,
+     que también recorta a cualquier hijo absoluto que se salga por
+     arriba/abajo del panel. Con fixed, garantias.js calcula la posición
+     en píxeles (posicionarMenuAbierto()) y el menú queda libre de ese
+     recorte. */
+  position: fixed;
   z-index: 20;
   min-width: 240px;
   max-height: 280px;

@@ -156,6 +156,29 @@
         </section>`;
       })
       .join("");
+
+    posicionarMenuAbierto();
+  }
+
+  // El panel de cada tabla tiene overflow-x: auto (para el scroll
+  // horizontal), lo que también recorta cualquier hijo absoluto que se
+  // salga por arriba o por abajo del panel. Para que el desplegable se
+  // vea completo, se posiciona con coordenadas fijas respecto a la
+  // pantalla (calculadas aquí), en vez de depender de su elemento padre.
+  function posicionarMenuAbierto() {
+    if (!tiendaMenuAbierta) return;
+    const boton = ui.tiendas.querySelector('.filtro-estado-btn-mini[aria-expanded="true"]');
+    const menu = ui.tiendas.querySelector(".filtro-estado-menu:not([hidden])");
+    if (!boton || !menu) return;
+
+    const rect = boton.getBoundingClientRect();
+    menu.style.top = rect.bottom + 6 + "px";
+
+    // Si no cabe hacia la derecha, se alinea contra el borde derecho de
+    // la pantalla en vez de salirse.
+    const izquierdaIdeal = rect.left;
+    const seSale = izquierdaIdeal + menu.offsetWidth > window.innerWidth - 8;
+    menu.style.left = (seSale ? window.innerWidth - menu.offsetWidth - 8 : izquierdaIdeal) + "px";
   }
 
   function renderizarTablaGarantias(tienda, filas) {
@@ -315,6 +338,20 @@
       renderizarTodo();
     }
   });
+  // El menú usa coordenadas fijas, calculadas UNA vez al abrirse; si la
+  // página se desplaza, se cierra en vez de quedar flotando en el lugar
+  // viejo (capture:true para enterarse aunque el scroll ocurra dentro
+  // de un panel con su propio overflow, que no burbujea como 'scroll').
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (tiendaMenuAbierta) {
+        tiendaMenuAbierta = null;
+        renderizarTodo();
+      }
+    },
+    true
+  );
 
   cargadoresDeVista.garantias = () => cargarGarantias(false);
 })();
