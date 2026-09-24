@@ -11,7 +11,19 @@
   const URL_GARANTIAS =
     "https://script.google.com/macros/s/AKfycbzPlWmtDOCWymL8Nc8TWw5tt5qnssJZqTdQ5762ZNz2qW8Avq7Ek-iryH4c3QIagLQo/exec";
 
+  // Reemplaza esto por la URL /exec del proyecto de Apps Script
+  // "correos.gs" (ver ese archivo: es un proyecto NUEVO, creado DESDE
+  // ADENTRO de catapu.serviciotecnico@gmail.com — Apps Script solo
+  // puede leer el Gmail de la cuenta que lo ejecuta). Hasta que lo
+  // publiques, "Ver historial" mostrará un error de carga.
+  const URL_CORREOS = "https://script.google.com/macros/s/AKfycby1AgKW9_Z6uhtjOR14HT6dlllfHtK63-OvrEmcOW9HZ-VVx4dLdD047TMabf-bujfK/exec";
+
   let esPrimeraCarga = true;
+
+  // El historial de un IMEI no cambia mientras estás viendo la pestaña
+  // (no depende del rango de fechas ni del buscador), así que se guarda
+  // aquí para no volver a pedirlo si el usuario lo abre dos veces.
+  const historialImeiCache = new Map();
 
   const ui = {
     status: document.getElementById("gar-status-line"),
@@ -197,8 +209,12 @@
           <td>${escaparHtml(f.documento || "—")}</td>
           <td>${escaparHtml(f.telefono || "—")}</td>
           <td>${escaparHtml(f.modelo || "—")}</td>
-          <td class="col-imei">${escaparHtml(f.imei || "—")}</td>
-        </tr>`
+          <td class="col-imei">
+            ${escaparHtml(f.imei || "—")}
+            ${f.imei ? `<button type="button" class="btn-historial-imei" data-imei="${escaparHtml(f.imei)}">Ver historial ▾</button>` : ""}
+          </td>
+        </tr>
+        ${f.imei ? `<tr class="fila-historial-imei" data-imei="${escaparHtml(f.imei)}" hidden><td colspan="9"></td></tr>` : ""}`
       )
       .join("");
 
@@ -278,6 +294,72 @@
   }
 
   // ----------------------------------------------------------
+  // Historial de un IMEI (correos de JotForm: recepción + informe técnico)
+  // ----------------------------------------------------------
+  async function alternarHistorialImei(boton) {
+    const filaDatos = boton.closest("tr");
+    const filaHistorial = filaDatos.nextElementSibling;
+    if (!filaHistorial || !filaHistorial.classList.contains("fila-historial-imei")) return;
+
+    const abrir = filaHistorial.hidden;
+    filaHistorial.hidden = !abrir;
+    boton.textContent = abrir ? "Ocultar historial ▴" : "Ver historial ▾";
+    if (!abrir) return; // se cerró: no hay nada más que hacer
+
+    const imei = boton.dataset.imei;
+    const celda = filaHistorial.querySelector("td");
+
+    if (historialImeiCache.has(imei)) {
+      celda.innerHTML = renderizarHistorialImei(historialImeiCache.get(imei));
+      return;
+    }
+
+    celda.innerHTML = '<p class="ranking-empty">Cargando historial…</p>';
+    try {
+      const datos = await cargarViaJSONP(`${URL_CORREOS}?imei=${encodeURIComponent(imei)}`);
+      if (datos && datos.error) throw new Error(datos.error);
+      if (!datos || !Array.isArray(datos.eventos)) {
+        throw new Error("Formato inesperado: revisa que apps-script/correos.gs esté publicado.");
+      }
+      historialImeiCache.set(imei, datos);
+      celda.innerHTML = renderizarHistorialImei(datos);
+    } catch (error) {
+      console.error(error);
+      celda.innerHTML = `<p class="ranking-empty">No se pudo cargar el historial. (${escaparHtml(error.message)})</p>`;
+    }
+  }
+
+  function renderizarHistorialImei(datos) {
+    if (datos.eventos.length === 0) {
+      return '<p class="ranking-empty">No se encontraron correos de JotForm para este IMEI.</p>';
+    }
+
+    const avisoClientes = datos.clientesDistintos > 1
+      ? `<p class="aviso-clientes-imei">⚠ ${datos.clientesDistintos} clientes distintos han tenido este equipo: ${escaparHtml(datos.clientes.map((c) => c.nombre || c.correo).join(", "))}</p>`
+      : `<p class="ranking-empty">${datos.clientesDistintos} cliente registrado para este equipo.</p>`;
+
+    const eventosHtml = datos.eventos
+      .map(
+        (ev) => `
+        <div class="evento-historial-imei">
+          <div class="evento-historial-cabecera">
+            <strong>${escaparHtml(ev.ticket || "—")}</strong>
+            <span>${escaparHtml(formatearClave(ev.fecha))}</span>
+            ${ev.sede ? `<span>${escaparHtml(ev.sede)}</span>` : ""}
+            ${ev.nombre ? `<span>${escaparHtml(ev.nombre)}</span>` : ""}
+          </div>
+          ${ev.falla ? `<div><span class="evento-historial-label">Falla inicial:</span> ${escaparHtml(ev.falla)}</div>` : ""}
+          ${ev.diagnostico ? `<div><span class="evento-historial-label">Diagnóstico:</span> ${escaparHtml(ev.diagnostico).replace(/\n/g, "<br>")}</div>` : ""}
+          ${ev.conclusion ? `<div><span class="evento-historial-label">Conclusión:</span> ${escaparHtml(ev.conclusion)}</div>` : ""}
+          ${ev.tecnico ? `<div><span class="evento-historial-label">Técnico:</span> ${escaparHtml(ev.tecnico)}</div>` : ""}
+        </div>`
+      )
+      .join("");
+
+    return `<div class="historial-imei">${avisoClientes}${eventosHtml}</div>`;
+  }
+
+  // ----------------------------------------------------------
   // Eventos y registro en la navegación
   // ----------------------------------------------------------
   ui.btn.addEventListener("click", () => cargarGarantias(true));
@@ -289,6 +371,15 @@
   // cada pintar(), así que no tiene sentido enganchar listeners a
   // elementos que van a desaparecer.
   ui.tiendas.addEventListener("click", (evento) => {
+    // "Ver historial" es independiente del resto (no pasa por
+    // renderizarTodo(): abre/cierra su propia fila con manipulación
+    // directa del DOM, sin reconstruir toda la tabla).
+    const botonHistorial = evento.target.closest(".btn-historial-imei");
+    if (botonHistorial) {
+      alternarHistorialImei(botonHistorial);
+      return;
+    }
+
     // Cualquier clic dentro del filtro (botón, checkbox, "todos"/"ninguno")
     // no debe llegar al listener de "clic afuera" de document — si no, el
     // menú se cerraría solo justo al marcar una casilla, porque para

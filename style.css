@@ -935,3 +935,63 @@ main {
 .filtro-estado-acciones button:hover {
   text-decoration: underline;
 }
+
+/* ============================================
+   HISTORIAL DE IMEI (correos de JotForm, Garantías)
+   ============================================ */
+.btn-historial-imei {
+  display: block;
+  margin-top: 4px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-historial-imei:hover {
+  text-decoration: underline;
+}
+
+.fila-historial-imei td {
+  background: var(--panel-alt);
+  padding: 14px 16px;
+}
+
+.aviso-clientes-imei {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--warn);
+}
+
+.evento-historial-imei {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.evento-historial-imei + .evento-historial-imei {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.evento-historial-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+}
+
+.evento-historial-cabecera strong {
+  color: var(--text);
+  font-family: var(--font-display);
+}
+
+.evento-historial-label {
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+}
