@@ -7,6 +7,17 @@
 const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxIRRSKngAHHfxOMtb-bNCDnWzPiU353fCy0-PFVkWXftGAM6Mkw1tcwEWrclyKgag9pg/exec";
 
+// Script de Correos/JotForm (apps-script/correos.gs), creado dentro de
+// catapu.serviciotecnico@gmail.com. Da el historial de un IMEI: falla
+// inicial, diagnóstico técnico, conclusión, técnico y cuántos clientes
+// distintos ha tenido el equipo.
+const URL_CORREOS =
+  "https://script.google.com/macros/s/AKfycby1AgKW9_Z6uhtjOR14HT6dlllfHtK63-OvrEmcOW9HZ-VVx4dLdD047TMabf-bujfK/exec";
+
+// El historial de un IMEI no cambia mientras se está viendo la página,
+// así que se guarda aquí para no volver a pedirlo si se abre dos veces.
+const historialImeiCache = new Map();
+
 // Aquí guardamos en memoria todos los registros que trae la hoja,
 // sin filtrar. Cada vez que el usuario cambia un filtro, partimos
 // de este arreglo y lo volvemos a filtrar — nunca volvemos a pedirle
@@ -526,7 +537,87 @@ function renderizarDetalleImei(registro) {
       </div>`;
   }).join("");
 
-  return `<div class="imei-result-block"><div class="imei-detail">${campos}</div></div>`;
+  const imei = String(registro["IMEI"] || "").replace(/\D/g, "");
+
+  return `
+    <div class="imei-result-block">
+      <div class="imei-detail">${campos}</div>
+      ${imei ? `
+        <button type="button" class="btn-historial-imei" data-imei="${escaparHtml(imei)}">Ver historial de correos ▾</button>
+        <div class="historial-imei-panel" data-imei="${escaparHtml(imei)}" hidden></div>
+      ` : ""}
+    </div>`;
+}
+
+// ----------------------------------------------------------
+// Historial de un IMEI (correos de JotForm: recepción + informe técnico)
+// Mismo endpoint y misma forma de datos que usa Garantías.
+// ----------------------------------------------------------
+async function alternarHistorialImei(boton) {
+  const panel = boton.nextElementSibling;
+  if (!panel || !panel.classList.contains("historial-imei-panel")) return;
+
+  const abrir = panel.hidden;
+  panel.hidden = !abrir;
+  boton.textContent = abrir ? "Ocultar historial ▴" : "Ver historial de correos ▾";
+  if (!abrir) return;
+
+  const imei = boton.dataset.imei;
+
+  if (historialImeiCache.has(imei)) {
+    panel.innerHTML = renderizarHistorialImei(historialImeiCache.get(imei));
+    return;
+  }
+
+  panel.innerHTML = '<p class="imei-not-found">Cargando historial…</p>';
+  try {
+    const datos = await cargarViaJSONP(`${URL_CORREOS}?imei=${encodeURIComponent(imei)}`);
+    if (datos && datos.error) throw new Error(datos.error);
+    if (!datos || !Array.isArray(datos.eventos)) {
+      throw new Error("Formato inesperado: revisa que apps-script/correos.gs esté publicado.");
+    }
+    historialImeiCache.set(imei, datos);
+    panel.innerHTML = renderizarHistorialImei(datos);
+  } catch (error) {
+    console.error(error);
+    panel.innerHTML = `<p class="imei-not-found">No se pudo cargar el historial. (${escaparHtml(error.message)})</p>`;
+  }
+}
+
+function renderizarHistorialImei(datos) {
+  if (datos.eventos.length === 0) {
+    return '<p class="imei-not-found">No se encontraron correos de JotForm para este IMEI.</p>';
+  }
+
+  const avisoClientes = datos.clientesDistintos > 1
+    ? `<p class="aviso-clientes-imei">⚠ ${datos.clientesDistintos} clientes distintos han tenido este equipo: ${escaparHtml(datos.clientes.map((c) => c.nombre || c.correo).join(", "))}</p>`
+    : `<p class="imei-not-found">${datos.clientesDistintos} cliente registrado para este equipo.</p>`;
+
+  const eventosHtml = datos.eventos
+    .map(
+      (ev) => `
+      <div class="evento-historial-imei">
+        <div class="evento-historial-cabecera">
+          <strong>${escaparHtml(ev.ticket || "—")}</strong>
+          <span>${escaparHtml(formatearFechaClave(ev.fecha))}</span>
+          ${ev.sede ? `<span>${escaparHtml(ev.sede)}</span>` : ""}
+          ${ev.nombre ? `<span>${escaparHtml(ev.nombre)}</span>` : ""}
+        </div>
+        ${ev.falla ? `<div><span class="evento-historial-label">Falla inicial:</span> ${escaparHtml(ev.falla)}</div>` : ""}
+        ${ev.diagnostico ? `<div><span class="evento-historial-label">Diagnóstico:</span> ${escaparHtml(ev.diagnostico).replace(/\n/g, "<br>")}</div>` : ""}
+        ${ev.conclusion ? `<div><span class="evento-historial-label">Conclusión:</span> ${escaparHtml(ev.conclusion)}</div>` : ""}
+        ${ev.tecnico ? `<div><span class="evento-historial-label">Técnico:</span> ${escaparHtml(ev.tecnico)}</div>` : ""}
+      </div>`
+    )
+    .join("");
+
+  return `<div class="historial-imei">${avisoClientes}${eventosHtml}</div>`;
+}
+
+function formatearFechaClave(clave) {
+  if (!clave) return "—";
+  const [anio, mes, dia] = clave.split("-");
+  return `${dia}/${mes}/${anio}`;
 }
 
 const MIN_DIGITOS_IMEI = 4;
@@ -613,6 +704,10 @@ if (el.btnTema) {
 el.tablaModelos.addEventListener("click", (evento) => {
   const fila = evento.target.closest(".fila-modelo");
   if (fila) alternarColores(fila);
+});
+el.resultadoImei.addEventListener("click", (evento) => {
+  const boton = evento.target.closest(".btn-historial-imei");
+  if (boton) alternarHistorialImei(boton);
 });
 el.tablaModelos.addEventListener("keydown", (evento) => {
   const fila = evento.target.closest(".fila-modelo");

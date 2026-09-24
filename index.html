@@ -264,8 +264,18 @@
         El documento se pide aparte por cada ticket, así que en rangos muy amplios (150+ tickets) puede quedar vacío en algunos.
       </p>
 
-      <main id="gar-tiendas">
-        <!-- Un bloque por tienda, generado por garantias.js -->
+      <main>
+        <!-- Historial de un IMEI por correos de JotForm — independiente
+             del rango de fechas y de si el ticket está visible abajo o
+             no. Solo aparece si se escriben suficientes dígitos. -->
+        <section class="panel panel-wide" id="gar-panel-historial-imei" hidden>
+          <h2 class="panel-title">Historial del equipo — IMEI <span id="gar-historial-imei-titulo"></span></h2>
+          <div id="gar-historial-imei-resultado"></div>
+        </section>
+
+        <div id="gar-tiendas">
+          <!-- Un bloque por tienda, generado por garantias.js -->
+        </div>
       </main>
 
       <footer class="footer">

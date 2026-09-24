@@ -995,3 +995,13 @@ main {
   font-family: var(--font-display);
   font-size: 11px;
 }
+
+/* Historial de IMEI dentro del panel de búsqueda de Producción (misma
+   info que en Garantías, pero el contenedor es un <div>, no una <tr>). */
+.historial-imei-panel {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--panel-alt);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}

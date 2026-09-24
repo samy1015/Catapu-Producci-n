@@ -32,6 +32,9 @@
     desde: document.getElementById("gar-fecha-desde"),
     hasta: document.getElementById("gar-fecha-hasta"),
     buscador: document.getElementById("gar-buscador-imei"),
+    panelHistorialImei: document.getElementById("gar-panel-historial-imei"),
+    historialImeiTitulo: document.getElementById("gar-historial-imei-titulo"),
+    historialImeiResultado: document.getElementById("gar-historial-imei-resultado"),
     btn: document.getElementById("gar-btn-refrescar"),
     tiendas: document.getElementById("gar-tiendas"),
     ultima: document.getElementById("gar-ultima-actualizacion"),
@@ -294,7 +297,56 @@
   }
 
   // ----------------------------------------------------------
+  // Historial de un IMEI, buscado directamente (independiente del rango
+  // de fechas y de si el ticket está visible en alguna tabla de abajo:
+  // busca en Gmail sin importar qué tienda cargó o qué fechas se eligieron).
+  // ----------------------------------------------------------
+  const MIN_DIGITOS_HISTORIAL_IMEI = 6;
+  let temporizadorHistorialImei = null;
+  let idBusquedaHistorialImei = 0;
+
+  function programarBusquedaImeiHistorial() {
+    clearTimeout(temporizadorHistorialImei);
+    temporizadorHistorialImei = setTimeout(buscarHistorialImeiIndependiente, 400);
+  }
+
+  async function buscarHistorialImeiIndependiente() {
+    const id = ++idBusquedaHistorialImei;
+    const imei = ui.buscador.value.trim().replace(/\D/g, "");
+
+    if (imei.length < MIN_DIGITOS_HISTORIAL_IMEI) {
+      ui.panelHistorialImei.hidden = true;
+      return;
+    }
+
+    ui.panelHistorialImei.hidden = false;
+    ui.historialImeiTitulo.textContent = imei;
+
+    if (historialImeiCache.has(imei)) {
+      ui.historialImeiResultado.innerHTML = renderizarHistorialImei(historialImeiCache.get(imei));
+      return;
+    }
+
+    ui.historialImeiResultado.innerHTML = '<p class="ranking-empty">Buscando…</p>';
+    try {
+      const datos = await cargarViaJSONP(`${URL_CORREOS}?imei=${encodeURIComponent(imei)}`);
+      if (id !== idBusquedaHistorialImei) return; // el usuario ya escribió otra cosa
+      if (datos && datos.error) throw new Error(datos.error);
+      if (!datos || !Array.isArray(datos.eventos)) {
+        throw new Error("Formato inesperado: revisa que apps-script/correos.gs esté publicado.");
+      }
+      historialImeiCache.set(imei, datos);
+      ui.historialImeiResultado.innerHTML = renderizarHistorialImei(datos);
+    } catch (error) {
+      if (id !== idBusquedaHistorialImei) return;
+      console.error(error);
+      ui.historialImeiResultado.innerHTML = `<p class="ranking-empty">No se pudo cargar el historial. (${escaparHtml(error.message)})</p>`;
+    }
+  }
+
+  // ----------------------------------------------------------
   // Historial de un IMEI (correos de JotForm: recepción + informe técnico)
+  // — versión desplegable, por fila de ticket
   // ----------------------------------------------------------
   async function alternarHistorialImei(boton) {
     const filaDatos = boton.closest("tr");
@@ -365,7 +417,10 @@
   ui.btn.addEventListener("click", () => cargarGarantias(true));
   ui.desde.addEventListener("change", () => cargarGarantias(false));
   ui.hasta.addEventListener("change", () => cargarGarantias(false));
-  ui.buscador.addEventListener("input", renderizarTodo);
+  ui.buscador.addEventListener("input", () => {
+    renderizarTodo(); // filtra al instante lo ya visible (dentro del rango de fechas)
+    programarBusquedaImeiHistorial(); // busca el historial completo, sin importar el rango
+  });
 
   // Delegado en ui.tiendas: el contenido se reconstruye por completo en
   // cada pintar(), así que no tiene sentido enganchar listeners a
