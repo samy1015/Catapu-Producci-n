@@ -390,25 +390,90 @@
       ? `<p class="aviso-clientes-imei">⚠ ${datos.clientesDistintos} clientes distintos han tenido este equipo: ${escaparHtml(datos.clientes.map((c) => c.nombre || c.correo).join(", "))}</p>`
       : `<p class="ranking-empty">${datos.clientesDistintos} cliente registrado para este equipo.</p>`;
 
-    const eventosHtml = datos.eventos
-      .map(
-        (ev) => `
-        <div class="evento-historial-imei">
-          <div class="evento-historial-cabecera">
-            <strong>${escaparHtml(ev.ticket || "—")}</strong>
-            <span>${escaparHtml(formatearClave(ev.fecha))}</span>
-            ${ev.sede ? `<span>${escaparHtml(ev.sede)}</span>` : ""}
-            ${ev.nombre ? `<span>${escaparHtml(ev.nombre)}</span>` : ""}
+    const eventosHtml = datos.eventos.map((ev) => renderizarEventoHistorial(ev, datos.imei)).join("");
+
+    return `<div class="historial-imei">${avisoClientes}${eventosHtml}</div>`;
+  }
+
+  // Un ticket trae dos correos separados (Recepción e Informe Técnico).
+  // Se muestran como una sola tarjeta con dos secciones (una por cada
+  // correo), separadas por una línea — cada una repite el ticket y su
+  // propia fecha, igual que en el papel que arma JotForm.
+  function renderizarEventoHistorial(ev, imei) {
+    const seccionRecepcion = ev.fechaRecepcion || ev.falla
+      ? `
+        <div class="historial-seccion">
+          <div class="historial-seccion-titulo">
+            <span class="historial-seccion-nombre">Recepción</span>
+            <span class="historial-seccion-meta"><strong>${escaparHtml(ev.ticket || "—")}</strong>${escaparHtml(formatearClave(ev.fechaRecepcion))}</span>
           </div>
-          ${ev.falla ? `<div><span class="evento-historial-label">Falla inicial:</span> ${escaparHtml(ev.falla)}</div>` : ""}
-          ${ev.diagnostico ? `<div><span class="evento-historial-label">Diagnóstico:</span> ${escaparHtml(ev.diagnostico).replace(/\n/g, "<br>")}</div>` : ""}
-          ${ev.conclusion ? `<div><span class="evento-historial-label">Conclusión:</span> ${escaparHtml(ev.conclusion)}</div>` : ""}
-          ${ev.tecnico ? `<div><span class="evento-historial-label">Técnico:</span> ${escaparHtml(ev.tecnico)}</div>` : ""}
+          <div class="historial-columnas">
+            ${columnaHistorial([
+              ["Razón", ev.razon],
+              ["Sede", ev.sede],
+              ["Comprobante", ev.comprobante],
+              // fechaComprobante no se reformatea: a diferencia de
+              // fechaRecepcion/fechaInforme (que arma correos.gs con
+              // Utilities.formatDate), este texto es tal cual lo
+              // escribió JotForm en la tabla del correo (ya en DD-MM-AAAA).
+              ["Fecha de comprobante", ev.fechaComprobante],
+            ])}
+            ${columnaHistorial([
+              ["Nombre", ev.nombre],
+              ["Correo", ev.correo],
+              ["Teléfono", ev.telefono],
+              ["Modelo", ev.modelo],
+              ["IMEI", imei],
+            ])}
+          </div>
+          ${cajaTextoHistorial("Problema reportado por el cliente", ev.falla)}
+        </div>`
+      : "";
+
+    const seccionInforme = ev.fechaInforme || ev.diagnostico
+      ? `
+        <div class="historial-seccion">
+          <div class="historial-seccion-titulo">
+            <span class="historial-seccion-nombre">Informe</span>
+            <span class="historial-seccion-meta"><strong>${escaparHtml(ev.ticket || "—")}</strong>${escaparHtml(formatearClave(ev.fechaInforme))}</span>
+          </div>
+          <div class="historial-columnas">
+            ${columnaHistorial([["Conclusión del caso/ticket", ev.conclusion]])}
+            ${columnaHistorial([["Técnico", ev.tecnico]])}
+          </div>
+          ${cajaTextoHistorial("Diagnostico técnico y conclusión", ev.diagnostico)}
+        </div>`
+      : "";
+
+    return `<div class="historial-evento">${seccionRecepcion}${seccionInforme}</div>`;
+  }
+
+  // Una columna de "etiqueta: valor" (el mismo look que ya usa el
+  // detalle de Producción). Los pares sin valor no ocupan espacio; si
+  // la columna entera queda vacía, no se dibuja.
+  function columnaHistorial(pares) {
+    const campos = pares
+      .filter(([, valor]) => valor)
+      .map(
+        ([etiqueta, valor]) => `
+        <div class="imei-field">
+          <span class="imei-field-label">${escaparHtml(etiqueta)}</span>
+          <span class="imei-field-value">${escaparHtml(valor)}</span>
         </div>`
       )
       .join("");
+    return campos ? `<div class="historial-columna">${campos}</div>` : "";
+  }
 
-    return `<div class="historial-imei">${avisoClientes}${eventosHtml}</div>`;
+  // Recuadro para el texto largo (falla / diagnóstico), con los saltos
+  // de línea que ya vienen del correo.
+  function cajaTextoHistorial(titulo, texto) {
+    if (!texto) return "";
+    return `
+      <div class="historial-caja-texto">
+        <span class="historial-caja-titulo">${escaparHtml(titulo)}</span>
+        ${escaparHtml(texto).replace(/\n/g, "<br>")}
+      </div>`;
   }
 
   // ----------------------------------------------------------

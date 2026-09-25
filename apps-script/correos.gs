@@ -91,16 +91,21 @@ function obtenerHistorialImei(imei) {
       if (tipo === "recepcion") {
         recepciones.push({
           ticket: ticket,
-          fecha: fecha,
+          fechaRecepcion: fecha,
+          razon: campos["razón de ingreso"] || "",
+          sede: campos["sede de ingreso"] || "",
           nombre: campos["nombre"] || "",
           correo: campos["correo electrónico"] || "",
-          sede: campos["sede de ingreso"] || "",
+          telefono: campos["número de teléfono"] || "",
+          modelo: campos["marca, modelo, etc"] || "",
+          comprobante: campos["numero de comprobante"] || "",
+          fechaComprobante: campos["fecha de comprobante"] || "",
           falla: campos["descripción de fallas / problemas mencionado por el cliente"] || "",
         });
       } else {
         informes.push({
           ticket: ticket,
-          fecha: fecha,
+          fechaInforme: fecha,
           tecnico: campos["técnico asignado"] || "",
           diagnostico: campos["diagnostico técnico y conclusión"] || "",
           conclusion: campos["conclusión del caso/ticket"] || "",
@@ -110,7 +115,8 @@ function obtenerHistorialImei(imei) {
   });
 
   // Un mismo ticket trae su Recepción y su Informe Técnico en dos
-  // correos separados; se juntan aquí en un solo evento por ticket.
+  // correos separados, con campos distintos (por eso "fechaRecepcion" y
+  // "fechaInforme" no se pisan entre sí al juntarlos en un solo evento).
   const eventosPorTicket = new Map();
   recepciones.forEach(r => {
     eventosPorTicket.set(r.ticket, Object.assign({}, eventosPorTicket.get(r.ticket), r));
@@ -118,7 +124,11 @@ function obtenerHistorialImei(imei) {
   informes.forEach(i => {
     eventosPorTicket.set(i.ticket, Object.assign({}, eventosPorTicket.get(i.ticket), i));
   });
-  const eventos = [...eventosPorTicket.values()].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+  const claveOrden = ev => ev.fechaInforme || ev.fechaRecepcion || "";
+  const eventos = [...eventosPorTicket.values()].sort((a, b) => {
+    const [x, y] = [claveOrden(a), claveOrden(b)];
+    return x < y ? 1 : x > y ? -1 : 0;
+  });
 
   // "Cuántos clientes distintos pasaron por este equipo": se cuenta por
   // correo (más confiable que el nombre); si un correo no tiene, se usa
