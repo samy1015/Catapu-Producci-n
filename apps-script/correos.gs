@@ -27,47 +27,6 @@ const ZONA_HORARIA = "America/Lima";
 const MIN_DIGITOS_IMEI = 6;
 const MAX_HILOS = 50; // tope de seguridad; un equipo real no debería superar esto
 
-// Función de diagnóstico: ejecútala manualmente desde el editor
-// (selecciónala en el desplegable de arriba y dale "Ejecutar"), y
-// revisa "Ver > Registros de ejecución" para ver qué imprimió.
-// No la usa el panel — es solo para depurar.
-function diagnostico() {
-  Logger.log("Cuenta que ejecuta el script: " + Session.getActiveUser().getEmail());
-
-  const soloRemitente = GmailApp.search("from:" + REMITENTE_JOTFORM, 0, 10);
-  Logger.log("Hilos encontrados solo con from:" + REMITENTE_JOTFORM + " -> " + soloRemitente.length);
-
-  const conImei = GmailApp.search("from:" + REMITENTE_JOTFORM + " 358540309805516", 0, 10);
-  Logger.log("Hilos encontrados con ese remitente + el IMEI de prueba -> " + conImei.length);
-
-  const soloImei = GmailApp.search("358540309805516", 0, 10);
-  Logger.log("Hilos encontrados buscando SOLO el IMEI (sin from:) -> " + soloImei.length);
-
-  if (soloRemitente.length > 0) {
-    const primerMensaje = soloRemitente[0].getMessages()[0];
-    Logger.log("Asunto del primer correo encontrado: " + primerMensaje.getSubject());
-  }
-
-  Logger.log("---- Detalle de los " + conImei.length + " hilos con el IMEI de prueba ----");
-  conImei.forEach(hilo => {
-    hilo.getMessages().forEach(mensaje => {
-      const html = mensaje.getBody();
-      const tipo = tipoDeCorreo(html);
-      Logger.log("Asunto: " + mensaje.getSubject());
-      Logger.log("  -> tipoDeCorreo(): " + tipo);
-      if (tipo) {
-        const campos = extraerCamposJotform(html);
-        Logger.log("  -> campos encontrados: " + Object.keys(campos).join(" | "));
-        Logger.log("  -> valor de 'imei / código de serie': " + JSON.stringify(campos["imei / código de serie"]));
-      } else {
-        // Para ver si el encabezado realmente no está, o está pero con
-        // otro formato (ej. entidades HTML en vez de tilde literal).
-        Logger.log("  -> primeros 400 caracteres del body: " + html.slice(0, 400));
-      }
-    });
-  });
-}
-
 function doGet(e) {
   const params = (e && e.parameter) || {};
   let json;

@@ -29,7 +29,7 @@
 // Parámetros del doGet (todos opcionales, &callback=nombre para JSONP):
 //   desde=AAAA-MM-DD, hasta=AAAA-MM-DD   rango por fecha de creación
 //                                        del ticket (por defecto: hoy)
-//   fresco=1                             ignora la caché de 5 minutos
+//   fresco=1                             ignora la caché (10 min)
 // ============================================================
 
 // Nombre a mostrar -> propiedad de script con su API key. El orden
@@ -163,9 +163,14 @@ function construirGarantiasJson(desde, hasta) {
 
   filas = quitarDuplicadosEntreSucursales(filas);
 
+  // Se ordena ANTES de pedir los documentos: si el rango tiene más de
+  // MAX_DOCUMENTOS tickets, agregarDocumentos() solo pide para los
+  // primeros — así esos "primeros" son los más recientes, no un
+  // subconjunto arbitrario según el orden en que llegó cada tienda.
+  filas.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+
   agregarDocumentos(filas, apiKeys, errores);
 
-  filas.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
   // idInterno y modificado ya cumplieron su función (deduplicar); no
   // hace falta mandarlos al panel. trasladoDesde sí se queda.
   filas.forEach(f => { delete f.idInterno; delete f.modificado; });

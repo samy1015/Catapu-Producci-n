@@ -476,7 +476,7 @@ function alternarColores(filaModelo) {
 }
 
 // ============================================================
-// 6. BÚSQUEDA POR IMEI (independiente de fecha y lote)
+// 7. BÚSQUEDA POR IMEI (independiente de fecha y lote)
 // ============================================================
 // Busca en TODA la información sin importar los filtros de fecha o
 // lote. Como el panel ya no descarga las columnas de detalle, la
@@ -680,18 +680,23 @@ async function buscarPorImei() {
 }
 
 // ============================================================
-// 7. UTILIDADES
+// 8. UTILIDADES
 // ============================================================
 // Evita que texto proveniente de la hoja rompa el HTML o inyecte
 // código si alguien escribe algo raro en una celda.
 function escaparHtml(texto) {
   const div = document.createElement("div");
   div.textContent = String(texto);
-  return div.innerHTML;
+  // textContent -> innerHTML escapa & < > pero NO las comillas (no hacen
+  // falta dentro de un nodo de texto). Varias vistas también usan esta
+  // función para armar atributos (ej. data-imei="${escaparHtml(...)}"),
+  // donde una comilla sin escapar sí podría cortar el atributo — se
+  // escapan aquí también, así el resultado es seguro en los dos casos.
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // ============================================================
-// 8. EVENTOS
+// 9. EVENTOS
 // ============================================================
 el.btnRefrescar.addEventListener("click", () => cargarDatos(true));
 el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
@@ -718,7 +723,7 @@ el.tablaModelos.addEventListener("keydown", (evento) => {
 });
 
 // ============================================================
-// 9. NAVEGACIÓN ENTRE VISTAS
+// 10. NAVEGACIÓN ENTRE VISTAS
 // ============================================================
 // Cada vista registra su cargador en `cargadoresDeVista`. Al abrir la
 // página se lanzan TODOS a la vez, así los datos de cada pestaña ya
@@ -741,7 +746,7 @@ const vistaDesdeHash = () => location.hash.replace("#", "") || "produccion";
 window.addEventListener("hashchange", () => mostrarVista(vistaDesdeHash()));
 
 // ============================================================
-// 10. ARRANQUE
+// 11. ARRANQUE
 // ============================================================
 // Esperamos a DOMContentLoaded para que reparacion.js (que se carga
 // después) ya haya registrado su cargador.
