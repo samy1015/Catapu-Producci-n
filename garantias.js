@@ -161,12 +161,13 @@
     ui.tiendas.innerHTML = tiendas
       .map((tienda) => {
         const ocultos = ocultosDeTienda(tienda);
+        const estados = estadosDeTienda(tienda);
         const filasTienda = filasBuscadas.filter((f) => f.tienda === tienda && !ocultos.has(f.estado));
         return `
         <section class="panel panel-wide panel-garantia">
           <h2 class="panel-title">${escaparHtml(tienda)} <span class="panel-title-count">(${filasTienda.length})</span></h2>
-          ${filasTienda.length || estadosDeTienda(tienda).length
-            ? renderizarTablaGarantias(tienda, filasTienda)
+          ${filasTienda.length || estados.length
+            ? renderizarTablaGarantias(tienda, filasTienda, estados)
             : '<p class="ranking-empty">Sin garantías en este rango.</p>'}
         </section>`;
       })
@@ -196,7 +197,7 @@
     menu.style.left = (seSale ? window.innerWidth - menu.offsetWidth - 8 : izquierdaIdeal) + "px";
   }
 
-  function renderizarTablaGarantias(tienda, filas) {
+  function renderizarTablaGarantias(tienda, filas, estados) {
     const filasHtml = filas
       .map(
         (f) => `
@@ -206,7 +207,7 @@
             ${renderizarTraslado(f.trasladoDesde)}
           </td>
           <td>${escaparHtml(f.ticket)}</td>
-          <td>${escaparHtml(formatearClave(f.fecha))}</td>
+          <td>${escaparHtml(formatearFechaClave(f.fecha))}</td>
           <td>${escaparHtml(f.nombre || "—")}</td>
           <td>${escaparHtml(f.correo || "—")}</td>
           <td>${escaparHtml(f.documento || "—")}</td>
@@ -225,7 +226,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th class="th-estado">Estado ${renderizarFiltroEstado(tienda)}</th>
+            <th class="th-estado">Estado ${renderizarFiltroEstado(tienda, estados)}</th>
             <th>Ticket</th><th>Fecha</th>
             <th>Nombre</th><th>Correo</th><th>Documento</th><th>Teléfono</th>
             <th>Modelo</th><th>IMEI</th>
@@ -237,8 +238,7 @@
 
   // Ícono + desplegable de checkboxes, dentro del propio encabezado
   // "Estado" de la tabla de esa tienda.
-  function renderizarFiltroEstado(tienda) {
-    const estados = estadosDeTienda(tienda);
+  function renderizarFiltroEstado(tienda, estados) {
     if (estados.length === 0) return "";
 
     const ocultos = ocultosDeTienda(tienda);
@@ -290,12 +290,6 @@
     return "badge-estado--warn";
   }
 
-  function formatearClave(clave) {
-    if (!clave) return "—";
-    const [anio, mes, dia] = clave.split("-");
-    return `${dia}/${mes}/${anio}`;
-  }
-
   // ----------------------------------------------------------
   // Historial de un IMEI, buscado directamente (independiente del rango
   // de fechas y de si el ticket está visible en alguna tabla de abajo:
@@ -331,7 +325,7 @@
     ui.historialImeiTitulo.textContent = imei;
 
     if (historialImeiCache.has(imei)) {
-      ui.historialImeiResultado.innerHTML = renderizarHistorialImei(historialImeiCache.get(imei));
+      ui.historialImeiResultado.innerHTML = renderizarHistorialImei(historialImeiCache.get(imei), CLASE_VACIO_HISTORIAL);
       return;
     }
 
@@ -344,7 +338,7 @@
         throw new Error("Formato inesperado: revisa que apps-script/correos.gs esté publicado.");
       }
       historialImeiCache.set(imei, datos);
-      ui.historialImeiResultado.innerHTML = renderizarHistorialImei(datos);
+      ui.historialImeiResultado.innerHTML = renderizarHistorialImei(datos, CLASE_VACIO_HISTORIAL);
     } catch (error) {
       if (id !== idBusquedaHistorialImei) return;
       console.error(error);
@@ -389,7 +383,7 @@
     const celda = filaHistorial.querySelector("td");
 
     if (historialImeiCache.has(imei)) {
-      celda.innerHTML = renderizarHistorialImei(historialImeiCache.get(imei));
+      celda.innerHTML = renderizarHistorialImei(historialImeiCache.get(imei), CLASE_VACIO_HISTORIAL);
       return;
     }
 
@@ -401,107 +395,18 @@
         throw new Error("Formato inesperado: revisa que apps-script/correos.gs esté publicado.");
       }
       historialImeiCache.set(imei, datos);
-      celda.innerHTML = renderizarHistorialImei(datos);
+      celda.innerHTML = renderizarHistorialImei(datos, CLASE_VACIO_HISTORIAL);
     } catch (error) {
       console.error(error);
       celda.innerHTML = `<p class="ranking-empty">No se pudo cargar el historial. (${escaparHtml(error.message)})</p>`;
     }
   }
 
-  function renderizarHistorialImei(datos) {
-    if (datos.eventos.length === 0) {
-      return '<p class="ranking-empty">No se encontraron correos de JotForm para este IMEI.</p>';
-    }
-
-    const avisoClientes = datos.clientesDistintos > 1
-      ? `<p class="aviso-clientes-imei">⚠ ${datos.clientesDistintos} clientes distintos han tenido este equipo: ${escaparHtml(datos.clientes.map((c) => c.nombre || c.correo).join(", "))}</p>`
-      : `<p class="ranking-empty">${datos.clientesDistintos} cliente registrado para este equipo.</p>`;
-
-    const eventosHtml = datos.eventos.map((ev) => renderizarEventoHistorial(ev, datos.imei)).join("");
-
-    return `<div class="historial-imei">${avisoClientes}${eventosHtml}</div>`;
-  }
-
-  // Un ticket trae dos correos separados (Recepción e Informe Técnico).
-  // Se muestran como una sola tarjeta con dos secciones (una por cada
-  // correo), separadas por una línea — cada una repite el ticket y su
-  // propia fecha, igual que en el papel que arma JotForm.
-  function renderizarEventoHistorial(ev, imei) {
-    const seccionRecepcion = ev.fechaRecepcion || ev.falla
-      ? `
-        <div class="historial-seccion">
-          <div class="historial-seccion-titulo">
-            <span class="historial-seccion-nombre">Recepción</span>
-            <span class="historial-seccion-meta"><strong>${escaparHtml(ev.ticket || "—")}</strong>${escaparHtml(formatearClave(ev.fechaRecepcion))}</span>
-          </div>
-          <div class="historial-columnas">
-            ${columnaHistorial([
-              ["Razón", ev.razon],
-              ["Sede", ev.sede],
-              ["Comprobante", ev.comprobante],
-              // fechaComprobante no se reformatea: a diferencia de
-              // fechaRecepcion/fechaInforme (que arma correos.gs con
-              // Utilities.formatDate), este texto es tal cual lo
-              // escribió JotForm en la tabla del correo (ya en DD-MM-AAAA).
-              ["Fecha de comprobante", ev.fechaComprobante],
-            ])}
-            ${columnaHistorial([
-              ["Nombre", ev.nombre],
-              ["Correo", ev.correo],
-              ["Teléfono", ev.telefono],
-              ["Modelo", ev.modelo],
-              ["IMEI", imei],
-            ])}
-          </div>
-          ${cajaTextoHistorial("Problema reportado por el cliente", ev.falla)}
-        </div>`
-      : "";
-
-    const seccionInforme = ev.fechaInforme || ev.diagnostico
-      ? `
-        <div class="historial-seccion">
-          <div class="historial-seccion-titulo">
-            <span class="historial-seccion-nombre">Informe</span>
-            <span class="historial-seccion-meta"><strong>${escaparHtml(ev.ticket || "—")}</strong>${escaparHtml(formatearClave(ev.fechaInforme))}</span>
-          </div>
-          <div class="historial-columnas">
-            ${columnaHistorial([["Conclusión del caso/ticket", ev.conclusion]])}
-            ${columnaHistorial([["Técnico", ev.tecnico]])}
-          </div>
-          ${cajaTextoHistorial("Diagnostico técnico y conclusión", ev.diagnostico)}
-        </div>`
-      : "";
-
-    return `<div class="historial-evento">${seccionRecepcion}${seccionInforme}</div>`;
-  }
-
-  // Una columna de "etiqueta: valor" (el mismo look que ya usa el
-  // detalle de Producción). Los pares sin valor no ocupan espacio; si
-  // la columna entera queda vacía, no se dibuja.
-  function columnaHistorial(pares) {
-    const campos = pares
-      .filter(([, valor]) => valor)
-      .map(
-        ([etiqueta, valor]) => `
-        <div class="imei-field">
-          <span class="imei-field-label">${escaparHtml(etiqueta)}</span>
-          <span class="imei-field-value">${escaparHtml(valor)}</span>
-        </div>`
-      )
-      .join("");
-    return campos ? `<div class="historial-columna">${campos}</div>` : "";
-  }
-
-  // Recuadro para el texto largo (falla / diagnóstico), con los saltos
-  // de línea que ya vienen del correo.
-  function cajaTextoHistorial(titulo, texto) {
-    if (!texto) return "";
-    return `
-      <div class="historial-caja-texto">
-        <span class="historial-caja-titulo">${escaparHtml(titulo)}</span>
-        ${escaparHtml(texto).replace(/\n/g, "<br>")}
-      </div>`;
-  }
+  // renderizarHistorialImei/renderizarEventoHistorial/columnaHistorial/
+  // cajaTextoHistorial viven en script.js (se cargan antes que este
+  // archivo) — Garantías solo le pasa su propia clase para los mensajes
+  // vacíos, para que combine con el resto de esta vista.
+  const CLASE_VACIO_HISTORIAL = "ranking-empty";
 
   // ----------------------------------------------------------
   // Eventos y registro en la navegación

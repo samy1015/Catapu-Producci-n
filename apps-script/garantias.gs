@@ -90,7 +90,7 @@ function claveDeHoy() {
 }
 
 // ------------------------------------------------------------
-// Orquestación (con caché de 5 minutos por rango de fechas)
+// Orquestación (con caché de 10 minutos por rango de fechas)
 // ------------------------------------------------------------
 function obtenerGarantiasJson(desde, hasta, forzar) {
   const clave = CACHE_PREFIJO + "_" + desde + "_" + hasta;

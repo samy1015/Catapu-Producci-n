@@ -620,14 +620,18 @@ async function alternarHistorialImei(boton) {
   }
 }
 
-function renderizarHistorialImei(datos) {
+// `claseVacio` es la clase CSS de los mensajes informativos (no error):
+// Producción usa "imei-not-found", pero Garantías (que reutiliza esta
+// misma función) usa "ranking-empty" para que combine con el resto de
+// su vista.
+function renderizarHistorialImei(datos, claseVacio = "imei-not-found") {
   if (datos.eventos.length === 0) {
-    return '<p class="imei-not-found">No se encontraron correos de JotForm para este IMEI.</p>';
+    return `<p class="${claseVacio}">No se encontraron correos de JotForm para este IMEI.</p>`;
   }
 
   const avisoClientes = datos.clientesDistintos > 1
     ? `<p class="aviso-clientes-imei">⚠ ${datos.clientesDistintos} clientes distintos han tenido este equipo: ${escaparHtml(datos.clientes.map((c) => c.nombre || c.correo).join(", "))}</p>`
-    : `<p class="imei-not-found">${datos.clientesDistintos} cliente registrado para este equipo.</p>`;
+    : `<p class="${claseVacio}">${datos.clientesDistintos} cliente registrado para este equipo.</p>`;
 
   const eventosHtml = datos.eventos.map((ev) => renderizarEventoHistorial(ev, datos.imei)).join("");
 
