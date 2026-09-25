@@ -279,9 +279,33 @@ function formatearClaveFecha(clave) {
   return `${dia}/${mes}/${anio}`;
 }
 
+// "ABRIL 2026A" -> [4, 2026, "A"], para poder ordenar los lotes en
+// orden calendario (no alfabético: "ABRIL" quedaría antes que "ENERO").
+const ORDEN_MESES = {
+  ENERO: 1, FEBRERO: 2, MARZO: 3, ABRIL: 4, MAYO: 5, JUNIO: 6,
+  JULIO: 7, AGOSTO: 8, SETIEMBRE: 9, SEPTIEMBRE: 9, OCTUBRE: 10,
+  NOVIEMBRE: 11, DICIEMBRE: 12,
+};
+
+function claveOrdenLote(lote) {
+  const m = lote.match(/^([A-ZÁÉÍÓÚÑ]+)\s+(\d{4})([A-Z]*)$/i);
+  if (!m) return [Infinity, Infinity, lote]; // "Sin lote" u otro formato: al final
+  const [, mes, anio, sufijo] = m;
+  const numeroMes = ORDEN_MESES[mes.toUpperCase()] || Infinity;
+  return [Number(anio), numeroMes, sufijo];
+}
+
+function compararLotes(a, b) {
+  const [anioA, mesA, sufijoA] = claveOrdenLote(a);
+  const [anioB, mesB, sufijoB] = claveOrdenLote(b);
+  if (anioA !== anioB) return anioA - anioB;
+  if (mesA !== mesB) return mesA - mesB;
+  return sufijoA < sufijoB ? -1 : sufijoA > sufijoB ? 1 : 0;
+}
+
 function poblarSelectorDeLotes(registros) {
   const loteActual = el.filtroLote.value;
-  const lotes = [...new Set(registros.map((r) => r.lote))].sort();
+  const lotes = [...new Set(registros.map((r) => r.lote))].sort(compararLotes);
 
   el.filtroLote.innerHTML = '<option value="">Todos</option>';
   lotes.forEach((lote) => {
