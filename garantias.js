@@ -319,6 +319,14 @@
       return;
     }
 
+    // Solo un historial visible a la vez: si había uno abierto por fila
+    // (el botón "Ver historial" de un ticket), se cierra al mostrar este.
+    if (filaHistorialAbierta) {
+      filaHistorialAbierta.fila.hidden = true;
+      filaHistorialAbierta.boton.textContent = "Ver historial ▾";
+      filaHistorialAbierta = null;
+    }
+
     ui.panelHistorialImei.hidden = false;
     ui.historialImeiTitulo.textContent = imei;
 
@@ -365,6 +373,13 @@
     }
 
     const abrir = !yaAbierta;
+
+    // Solo un historial visible a la vez: si el buscador de IMEI tenía
+    // su propio panel abierto, se cierra al mostrar el de esta fila.
+    if (abrir && !ui.panelHistorialImei.hidden) {
+      ui.panelHistorialImei.hidden = true;
+    }
+
     filaHistorial.hidden = !abrir;
     boton.textContent = abrir ? "Ocultar historial ▴" : "Ver historial ▾";
     filaHistorialAbierta = abrir ? { boton, fila: filaHistorial } : null;
