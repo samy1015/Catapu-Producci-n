@@ -348,14 +348,26 @@
   // Historial de un IMEI (correos de JotForm: recepción + informe técnico)
   // — versión desplegable, por fila de ticket
   // ----------------------------------------------------------
+  // Solo un historial abierto a la vez: al abrir uno, se cierra el que
+  // estuviera abierto antes (si era otro).
+  let filaHistorialAbierta = null; // { boton, fila } o null
+
   async function alternarHistorialImei(boton) {
     const filaDatos = boton.closest("tr");
     const filaHistorial = filaDatos.nextElementSibling;
     if (!filaHistorial || !filaHistorial.classList.contains("fila-historial-imei")) return;
 
-    const abrir = filaHistorial.hidden;
+    const yaAbierta = !filaHistorial.hidden;
+
+    if (filaHistorialAbierta && filaHistorialAbierta.fila !== filaHistorial) {
+      filaHistorialAbierta.fila.hidden = true;
+      filaHistorialAbierta.boton.textContent = "Ver historial ▾";
+    }
+
+    const abrir = !yaAbierta;
     filaHistorial.hidden = !abrir;
     boton.textContent = abrir ? "Ocultar historial ▴" : "Ver historial ▾";
+    filaHistorialAbierta = abrir ? { boton, fila: filaHistorial } : null;
     if (!abrir) return; // se cerró: no hay nada más que hacer
 
     const imei = boton.dataset.imei;

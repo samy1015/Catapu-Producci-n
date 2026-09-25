@@ -553,13 +553,25 @@ function renderizarDetalleImei(registro) {
 // Historial de un IMEI (correos de JotForm: recepción + informe técnico)
 // Mismo endpoint y misma forma de datos que usa Garantías.
 // ----------------------------------------------------------
+// Solo un historial abierto a la vez: al abrir uno, se cierra el que
+// estuviera abierto antes (si era otro).
+let panelHistorialAbierto = null; // { boton, panel } o null
+
 async function alternarHistorialImei(boton) {
   const panel = boton.nextElementSibling;
   if (!panel || !panel.classList.contains("historial-imei-panel")) return;
 
-  const abrir = panel.hidden;
+  const yaAbierto = !panel.hidden;
+
+  if (panelHistorialAbierto && panelHistorialAbierto.panel !== panel) {
+    panelHistorialAbierto.panel.hidden = true;
+    panelHistorialAbierto.boton.textContent = "Ver historial de correos ▾";
+  }
+
+  const abrir = !yaAbierto;
   panel.hidden = !abrir;
   boton.textContent = abrir ? "Ocultar historial ▴" : "Ver historial de correos ▾";
+  panelHistorialAbierto = abrir ? { boton, panel } : null;
   if (!abrir) return;
 
   const imei = boton.dataset.imei;
