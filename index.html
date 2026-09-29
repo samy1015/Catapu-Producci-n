@@ -39,6 +39,7 @@
         <a href="#produccion" class="nav-link nav-link--active" data-vista="produccion">Producción</a>
         <a href="#reparacion" class="nav-link" data-vista="reparacion">Reparación</a>
         <a href="#garantias" class="nav-link" data-vista="garantias">Garantías</a>
+        <a href="#tickets" class="nav-link" data-vista="tickets">Tickets</a>
       </nav>
 
       <div class="sidebar-footer">
@@ -284,11 +285,195 @@
 
     </div><!-- /vista-garantias -->
 
+    <!-- ---------- Vista: Tickets ---------- -->
+    <div class="vista" id="vista-tickets" hidden>
+
+      <header class="topbar">
+        <h1 class="page-title">Tickets</h1>
+
+        <div class="controls">
+          <label class="control">
+            <span class="control-label">Desde</span>
+            <input type="date" id="tk-fecha-desde" />
+          </label>
+          <label class="control">
+            <span class="control-label">Hasta</span>
+            <input type="date" id="tk-fecha-hasta" />
+          </label>
+          <button id="tk-btn-refrescar" class="btn-refresh" title="Volver a cargar datos">
+            <span class="refresh-icon">↻</span> Actualizar
+          </button>
+          <button id="tk-btn-nuevo" class="btn-refresh" type="button">+ Nuevo ticket</button>
+        </div>
+      </header>
+
+      <p class="status-line" id="tk-status-line" aria-live="polite">Cargando datos…</p>
+      <p class="status-line is-error" id="tk-aviso-rango" role="alert" hidden>
+        La fecha "Desde" es posterior a "Hasta". Corrige el rango para ver resultados.
+      </p>
+
+      <main>
+        <!-- Formulario de alta, plegado hasta que se pida "+ Nuevo ticket" -->
+        <section class="panel panel-wide" id="tk-panel-form" hidden>
+          <h2 class="panel-title">Nuevo ticket</h2>
+          <form id="tk-form">
+            <div class="tk-form-dupla">
+              <div class="tk-form-grupo">
+                <span class="control-label">Razón de ingreso</span>
+                <div class="tk-form-checks tk-form-checks--col" id="tk-f-tipo-grupo">
+                  <label class="tk-check"><input type="checkbox" value="Servicio técnico" checked /> Servicio técnico</label>
+                  <label class="tk-check"><input type="checkbox" value="Garantía - Equipo CATAPU" /> Garantía - Equipo CATAPU</label>
+                  <label class="tk-check"><input type="checkbox" value="Garantía - Repuestos / Reparación" /> Garantía - Repuestos / Reparación</label>
+                </div>
+              </div>
+              <div class="tk-form-grupo">
+                <span class="control-label">Sede de ingreso</span>
+                <div class="tk-form-checks tk-form-checks--col" id="tk-f-tienda-grupo">
+                  <label class="tk-check"><input type="checkbox" value="Miraflores" checked /> Expocentro, Miraflores</label>
+                  <label class="tk-check"><input type="checkbox" value="Caminos del Inca" /> Caminos del Inca, Surco</label>
+                  <label class="tk-check"><input type="checkbox" value="Taller" /> Laboratorio principal</label>
+                </div>
+              </div>
+            </div>
+
+            <h3 class="tk-form-seccion">Datos del cliente</h3>
+            <div class="tk-form-grid tk-form-grid--3">
+              <label class="control">
+                <span class="control-label">Nombres</span>
+                <input type="text" id="tk-f-nombres" required />
+              </label>
+              <label class="control">
+                <span class="control-label">Apellidos</span>
+                <input type="text" id="tk-f-apellidos" required />
+              </label>
+              <label class="control">
+                <span class="control-label">Documento</span>
+                <input type="text" id="tk-f-documento" />
+              </label>
+            </div>
+            <div class="tk-form-grid tk-form-grid--2">
+              <label class="control">
+                <span class="control-label">Número de teléfono</span>
+                <input type="tel" id="tk-f-telefono" />
+              </label>
+              <label class="control">
+                <span class="control-label">Correo electrónico</span>
+                <input type="email" id="tk-f-correo" />
+              </label>
+            </div>
+
+            <h3 class="tk-form-seccion">Datos del equipo</h3>
+            <div class="tk-form-grid tk-form-grid--2">
+              <label class="control">
+                <span class="control-label">IMEI</span>
+                <input type="text" id="tk-f-imei" inputmode="numeric" />
+              </label>
+              <label class="control">
+                <span class="control-label">Marca, Modelo, etc</span>
+                <input type="text" id="tk-f-modelo" required />
+              </label>
+            </div>
+            <div class="tk-form-grid tk-form-grid--3">
+              <label class="control">
+                <span class="control-label">Contraseña (si posee)</span>
+                <input type="text" id="tk-f-contrasena" />
+              </label>
+              <label class="control">
+                <span class="control-label">Fecha de compra</span>
+                <input type="date" id="tk-f-fecha-compra" />
+              </label>
+              <label class="control">
+                <span class="control-label">Número de comprobante</span>
+                <input type="text" id="tk-f-comprobante" />
+              </label>
+            </div>
+            <label class="control tk-form-falla">
+              <span class="control-label">Descripción de Fallas / Problemas mencionado por el cliente</span>
+              <textarea id="tk-f-falla" rows="3"></textarea>
+            </label>
+
+            <div class="tk-form-campo">
+              <span class="control-label">Accesorios recibidos con el equipo</span>
+              <div class="tk-form-checks tk-form-checks--col2" id="tk-f-accesorios">
+                <label class="tk-check"><input type="checkbox" value="Cargador de pared" /> Cargador de pared</label>
+                <label class="tk-check"><input type="checkbox" value="Protector de pantalla" /> Protector de pantalla</label>
+                <label class="tk-check"><input type="checkbox" value="Ningún Accesorio" id="tk-f-acc-ninguno" /> Ningún Accesorio</label>
+                <label class="tk-check"><input type="checkbox" value="Case/Funda" /> Case/Funda</label>
+                <label class="tk-check"><input type="checkbox" value="Cable de carga" /> Cable de carga</label>
+                <label class="tk-check"><input type="checkbox" value="Tarjeta SIM / ISIM" /> Tarjeta SIM / ISIM</label>
+              </div>
+            </div>
+
+            <div class="tk-form-dupla">
+              <div class="tk-form-grupo">
+                <span class="control-label">¿Pudo ser probado el equipo?</span>
+                <div class="tk-form-checks tk-form-checks--col" id="tk-f-probado-grupo">
+                  <label class="tk-check"><input type="checkbox" value="Pudo ser probado" /> Pudo ser probado</label>
+                  <label class="tk-check"><input type="checkbox" value="No pudo ser probado" /> No pudo ser probado</label>
+                </div>
+              </div>
+              <label class="control">
+                <span class="control-label">Agregar fotos</span>
+                <input type="file" id="tk-f-fotos" accept="image/*" multiple />
+              </label>
+            </div>
+
+            <div class="tk-form-grid tk-form-grid--1">
+              <label class="control">
+                <span class="control-label">Fecha de hoy</span>
+                <input type="date" id="tk-f-fecha-hoy" disabled />
+              </label>
+            </div>
+            <div class="tk-form-grid tk-form-grid--1">
+              <label class="control">
+                <span class="control-label">Fecha estimada de entrega</span>
+                <input type="date" id="tk-f-fecha-entrega" />
+              </label>
+            </div>
+            <div class="tk-form-grid tk-form-grid--1">
+              <label class="control">
+                <span class="control-label">Técnico</span>
+                <select id="tk-f-tecnico">
+                  <option value="">Sin asignar</option>
+                  <option value="Víctor A.">Víctor A.</option>
+                  <option value="Mario L.">Mario L.</option>
+                  <option value="Samy B.">Samy B.</option>
+                  <option value="Bruce M.">Bruce M.</option>
+                  <option value="Pierre B.">Pierre B.</option>
+                  <option value="Jhon R.">Jhon R.</option>
+                  <option value="Hermes R.">Hermes R.</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="tk-form-acciones">
+              <button type="submit" class="btn-refresh">Guardar</button>
+              <button type="button" class="btn-refresh" id="tk-btn-cancelar">Cancelar</button>
+              <span class="status-line" id="tk-form-status"></span>
+            </div>
+          </form>
+        </section>
+
+        <div id="tk-tiendas">
+          <!-- Un bloque por tienda, generado por tickets.js -->
+        </div>
+      </main>
+
+      <footer class="footer">
+        <span id="tk-ultima-actualizacion"></span>
+      </footer>
+
+    </div><!-- /vista-tickets -->
+
     </div>
   </div>
 
   <script src="script.js"></script>
   <script src="reparacion.js"></script>
   <script src="garantias.js"></script>
+  <!-- Solo la vista Tickets la necesita: habla directo con Supabase,
+       sin pasar por Apps Script (ver supabase/tickets.sql). -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="tickets.js"></script>
 </body>
 </html>
