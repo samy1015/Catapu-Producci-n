@@ -27,7 +27,24 @@
 </head>
 <body>
 
-  <div class="app-shell">
+  <!-- ============ LOGIN ============ -->
+  <div class="login-pantalla" id="pantalla-login" hidden>
+    <form class="login-caja" id="login-form">
+      <img src="assets/logo-wordmark.png" alt="Catapu" class="login-logo" />
+      <label class="control">
+        <span class="control-label">Correo</span>
+        <input type="email" id="login-correo" required autocomplete="username" />
+      </label>
+      <label class="control">
+        <span class="control-label">Contraseña</span>
+        <input type="password" id="login-clave" required autocomplete="current-password" />
+      </label>
+      <button type="submit" class="btn-refresh" id="login-boton">Ingresar</button>
+      <p class="status-line is-error" id="login-error" role="alert" hidden>Correo o contraseña incorrectos.</p>
+    </form>
+  </div>
+
+  <div class="app-shell" id="app-shell" hidden>
 
     <!-- ============ BARRA LATERAL ============ -->
     <aside class="sidebar">
@@ -43,6 +60,9 @@
       </nav>
 
       <div class="sidebar-footer">
+        <button id="btn-cerrar-sesion" class="theme-toggle" type="button" title="Cerrar sesión">
+          <span aria-hidden="true">⏻</span>
+        </button>
         <button id="btn-tema" class="theme-toggle" type="button">
           <span class="theme-toggle-icon" aria-hidden="true">☾</span>
         </button>
@@ -468,12 +488,13 @@
     </div>
   </div>
 
+  <!-- Supabase + auth.js van primero: protegen las 4 pestañas con
+       login antes de que arranque nada más (ver auth.js). -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
   <script src="script.js"></script>
   <script src="reparacion.js"></script>
   <script src="garantias.js"></script>
-  <!-- Solo la vista Tickets la necesita: habla directo con Supabase,
-       sin pasar por Apps Script (ver supabase/tickets.sql). -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="tickets.js"></script>
 </body>
 </html>

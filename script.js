@@ -135,8 +135,13 @@ function cargarViaJSONP(url) {
       resolve(datos);
     };
 
+    // window.claveAppsScript la deja auth.js apenas hay sesión (viene de
+    // Supabase, tabla "config_privada"): los 4 Apps Script la exigen en
+    // su doGet antes de responder nada, así que se agrega sola acá para
+    // no tener que tocar cada llamada por separado.
     const separador = url.includes("?") ? "&" : "?";
-    etiquetaScript.src = `${url}${separador}callback=${nombreCallback}`;
+    const clave = window.claveAppsScript ? `&clave=${encodeURIComponent(window.claveAppsScript)}` : "";
+    etiquetaScript.src = `${url}${separador}callback=${nombreCallback}${clave}`;
     etiquetaScript.onerror = () => {
       limpiar();
       reject(new Error("No se pudo contactar al Apps Script (revisa la URL o que esté implementado como 'Cualquier usuario')."));
@@ -853,9 +858,11 @@ window.addEventListener("hashchange", () => mostrarVista(vistaDesdeHash()));
 // ============================================================
 // 11. ARRANQUE
 // ============================================================
-// Esperamos a DOMContentLoaded para que reparacion.js (que se carga
-// después) ya haya registrado su cargador.
-document.addEventListener("DOMContentLoaded", () => {
+// No se auto-ejecuta: la dispara auth.js una sola vez que confirma que
+// hay sesión iniciada (ver mostrarApp() ahí). Para ese entonces
+// reparacion.js/garantias.js/tickets.js ya registraron su cargador en
+// cargadoresDeVista (auth.js espera a DOMContentLoaded antes de llamarla).
+window.iniciarApp = function () {
   mostrarVista(vistaDesdeHash());
   Object.values(cargadoresDeVista).forEach((cargar) => cargar());
-});
+};

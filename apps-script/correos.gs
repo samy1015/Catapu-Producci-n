@@ -29,8 +29,12 @@ const MAX_HILOS = 50; // tope de seguridad; un equipo real no debería superar e
 
 function doGet(e) {
   const params = (e && e.parameter) || {};
-  let json;
 
+  if (!verificarClave(params.clave)) {
+    return responder(JSON.stringify({ error: "No autorizado." }), params.callback);
+  }
+
+  let json;
   try {
     // Solo dígitos: evita que alguien meta operadores de búsqueda de
     // Gmail (ej. "OR", "has:attachment") a través de este parámetro.
@@ -44,6 +48,20 @@ function doGet(e) {
   }
 
   return responder(json, params.callback);
+}
+
+// Clave compartida (Supabase, tabla "config_privada") que solo se le
+// entrega a un usuario ya logueado — ver auth.js del dashboard. Evita
+// que alguien sin cuenta use esta URL directamente, aunque la
+// encuentre en el código público de GitHub. Configúrala en
+// Configuración del proyecto > Propiedades de secuencia de comandos >
+// CLAVE_ACCESO, con el mismo valor que guardaste en Supabase. OJO:
+// este proyecto vive en la cuenta catapu.serviciotecnico@gmail.com,
+// distinta a la de los otros 3 Apps Script — la propiedad se configura
+// acá por separado.
+function verificarClave(clave) {
+  const esperada = PropertiesService.getScriptProperties().getProperty("CLAVE_ACCESO");
+  return !!esperada && clave === esperada;
 }
 
 function responder(json, callback) {

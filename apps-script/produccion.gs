@@ -51,8 +51,12 @@ const CACHE_TAM_TROZO = 40000; // cada valor de caché admite hasta 100 KB
 
 function doGet(e) {
   const params = (e && e.parameter) || {};
-  let json;
 
+  if (!verificarClave(params.clave)) {
+    return responder(JSON.stringify({ error: "No autorizado." }), params.callback);
+  }
+
+  let json;
   try {
     if (params.imei) {
       json = JSON.stringify(buscarPorImei(params.imei));
@@ -65,6 +69,17 @@ function doGet(e) {
   }
 
   return responder(json, params.callback);
+}
+
+// Clave compartida (Supabase, tabla "config_privada") que solo se le
+// entrega a un usuario ya logueado — ver auth.js del dashboard. Evita
+// que alguien sin cuenta use esta URL directamente, aunque la
+// encuentre en el código público de GitHub. Configúrala en
+// Configuración del proyecto > Propiedades de secuencia de comandos >
+// CLAVE_ACCESO, con el mismo valor que guardaste en Supabase.
+function verificarClave(clave) {
+  const esperada = PropertiesService.getScriptProperties().getProperty("CLAVE_ACCESO");
+  return !!esperada && clave === esperada;
 }
 
 // Responde JSONP si piden callback; si no, JSON normal.

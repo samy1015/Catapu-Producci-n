@@ -1,8 +1,9 @@
 -- Tabla de tickets (Garantía y Servicio técnico) — Catapu
 -- Para un proyecto NUEVO: pega este archivo entero en Supabase >
 -- SQL Editor > New query > Run.
--- Si ya tenías la tabla creada de antes, usa tickets_migracion_v2.sql
--- en vez de este (este CREATE TABLE no toca nada si la tabla ya existe).
+-- Si ya tenías la tabla creada de antes, usa las migraciones
+-- tickets_migracion_v2/v3/v4.sql en vez de este (este CREATE TABLE no
+-- toca nada si la tabla ya existe).
 
 create extension if not exists pgcrypto; -- para gen_random_uuid()
 
@@ -59,31 +60,57 @@ create table if not exists tickets (
 
 alter table tickets enable row level security;
 
--- Sin control de acceso por ahora (decisión del negocio): cualquiera
--- con la anon key (pública, va en el propio HTML del sitio) puede leer,
--- crear y actualizar tickets. El día que quieras restringirlo, estas
--- son las políticas a reemplazar por unas que exijan auth.uid().
-create policy "anon puede leer tickets" on tickets
-  for select to anon using (true);
+-- Solo cuentas logueadas (Supabase Auth — ver auth.js): el dashboard
+-- entero vive detrás de un login, así que aquí no hace falta permitir
+-- "anon". Las cuentas se crean a mano desde Authentication > Users.
+create policy "logueados pueden leer tickets" on tickets
+  for select to authenticated using (true);
 
-create policy "anon puede crear tickets" on tickets
-  for insert to anon with check (true);
+create policy "logueados pueden crear tickets" on tickets
+  for insert to authenticated with check (true);
 
-create policy "anon puede actualizar tickets" on tickets
-  for update to anon using (true) with check (true);
+create policy "logueados pueden actualizar tickets" on tickets
+  for update to authenticated using (true) with check (true);
 
 -- ------------------------------------------------------------
 -- Almacenamiento de fotos del equipo
 -- ------------------------------------------------------------
--- Bucket público: cualquiera con la URL de una foto puede verla (sin
--- necesidad de estar loggeado), igual de abierto que el resto del
--- sistema por ahora.
+-- OJO: el bucket es público (public=true), lo que en Supabase hace que
+-- la URL directa de un archivo (getPublicUrl) se pueda leer SIN pasar
+-- por RLS ni login — la política de "select" de abajo solo aplica a
+-- la API autenticada, no a esa URL directa. Las URLs no son adivinables
+-- (incluyen el UUID del ticket), pero no son privadas de verdad. Si en
+-- algún momento hace falta que sí lo sean, hay que volver el bucket
+-- privado y servir las fotos con createSignedUrl() en vez de la URL
+-- pública guardada en "fotos".
 insert into storage.buckets (id, name, public)
 values ('fotos-tickets', 'fotos-tickets', true)
 on conflict (id) do nothing;
 
-create policy "anon puede subir fotos de tickets" on storage.objects
-  for insert to anon with check (bucket_id = 'fotos-tickets');
+create policy "logueados pueden subir fotos de tickets" on storage.objects
+  for insert to authenticated with check (bucket_id = 'fotos-tickets');
 
-create policy "cualquiera puede ver fotos de tickets" on storage.objects
-  for select to anon using (bucket_id = 'fotos-tickets');
+create policy "logueados pueden ver fotos de tickets" on storage.objects
+  for select to authenticated using (bucket_id = 'fotos-tickets');
+
+-- ------------------------------------------------------------
+-- Clave compartida para los Apps Script de solo lectura (Producción,
+-- Reparación, Garantías, Correos) — no usan Supabase, así que cada uno
+-- valida esta misma clave en su doGet() antes de responder cualquier
+-- cosa. Solo un usuario logueado puede leerla.
+-- ------------------------------------------------------------
+create table if not exists config_privada (
+  clave text primary key,
+  valor text not null
+);
+
+alter table config_privada enable row level security;
+
+create policy "logueados pueden leer config" on config_privada
+  for select to authenticated using (true);
+-- Sin políticas de insert/update/delete a propósito: se administra a
+-- mano desde el SQL Editor (con tu sesión de dueño, que no pasa por
+-- RLS), nunca desde la web. Reemplaza el valor por uno propio:
+insert into config_privada (clave, valor)
+values ('apps_script_secreto', 'CAMBIA_ESTO_POR_UN_TEXTO_LARGO_Y_ALEATORIO')
+on conflict (clave) do nothing;

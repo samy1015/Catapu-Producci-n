@@ -1250,3 +1250,54 @@ main {
     grid-auto-flow: row;
   }
 }
+
+/* ============================================
+   LOGIN
+   ============================================ */
+/* [hidden] del navegador y .app-shell/.login-pantalla (display: grid/
+   flex) tienen la MISMA prioridad CSS — sin esto, el atributo "hidden"
+   que pone auth.js pierde contra el display de acá y el elemento se ve
+   igual, aunque JS lo haya marcado como oculto. */
+.login-pantalla[hidden],
+.app-shell[hidden] {
+  display: none;
+}
+
+.login-pantalla {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 20px;
+}
+
+.login-caja {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 32px 28px;
+}
+
+.login-logo {
+  width: 100%;
+  max-width: 170px;
+  height: auto;
+  object-fit: contain;
+  margin: 0 auto 8px;
+}
+
+.login-caja .btn-refresh {
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.login-caja .status-line {
+  margin: 0;
+  text-align: center;
+}

@@ -7,17 +7,13 @@
 // (cargada en index.html antes de este archivo). Ver supabase/*.sql
 // para la tabla, sus políticas de acceso y el bucket de fotos.
 // ============================================================
-// Se carga después de script.js y reutiliza sus utilidades globales:
-// escaparHtml, formatearFechaClave, cargarViaJSONP, APPS_SCRIPT_URL
-// (esta última solo para autocompletar el modelo por IMEI, buscando
-// en la misma hoja de Producción).
+// Se carga después de auth.js y script.js, y reutiliza sus globales:
+// supabaseCliente (ya logueado — las políticas de "tickets" exigen
+// sesión iniciada), escaparHtml, formatearFechaClave, cargarViaJSONP,
+// APPS_SCRIPT_URL (esta última solo para autocompletar el modelo por
+// IMEI, buscando en la misma hoja de Producción).
 (function () {
-  // Configuración del proyecto > API, en supabase.com. La anon key es
-  // pública a propósito (va en el HTML del sitio) — el control de
-  // acceso real vive en las políticas de supabase/tickets.sql, no en
-  // ocultar esta clave.
-  const SUPABASE_URL = "https://rblulsylqgkhiszkhozu.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_2jjeR-dl13PNvF37-5LHCA_5oNvmAcj";
+  const cliente = supabaseCliente;
 
   const TIENDAS_TICKETS = ["Caminos del Inca", "Miraflores", "Taller"];
   const ESTADOS_TICKET = [
@@ -29,8 +25,6 @@
     "Cancelado",
   ];
   const BUCKET_FOTOS = "fotos-tickets";
-
-  const cliente = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   let esPrimeraCarga = true;
   let filasActuales = [];
