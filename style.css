@@ -756,6 +756,13 @@ main {
 /* La ficha del ticket en el que se hizo clic, debajo de las 3 sedes. */
 #tk-detalle-contenedor {
   margin-top: 20px;
+  /* .panel trae overflow-x: auto, y fijar un overflow fuerza al otro
+     eje a dejar de ser "visible" — eso convierte a este panel en el
+     "ancestro con scroll" más cercano para position: sticky, aunque
+     nunca llegue a tener scroll propio, y el panel lateral de la
+     ficha (.tk-ficha-lateral) deja de poder pegarse a la ventana real.
+     body ya tiene overflow-x: hidden como red de seguridad general. */
+  overflow-x: visible;
 }
 
 /* Un <section> como hijo de grid mide, por defecto, al menos lo que
@@ -1335,6 +1342,12 @@ main {
     grid-template-columns: 1fr;
     grid-auto-flow: row;
   }
+
+  /* Menos aire alrededor de la foto ampliada en pantallas chicas, para
+     que la imagen aproveche el ancho en vez de quedar diminuta. */
+  .tk-lightbox {
+    padding: 16px;
+  }
 }
 
 /* ============================================
@@ -1415,7 +1428,7 @@ main {
   font-family: var(--font-mono);
   color: var(--accent);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 20px;
 }
 
 /* 6 columnas de ancho FIJO (ninguna max-content/auto): cada fila es su
@@ -1493,6 +1506,28 @@ main {
   grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
   gap: 32px;
   align-items: start;
+}
+
+/* Línea que separa la columna principal (falla + informe) de la
+   lateral (estado + datos), dentro del espacio en blanco del gap. */
+.tk-ficha-principal {
+  border-right: 1px solid var(--line);
+}
+
+@media (max-width: 1100px) {
+  .tk-ficha-principal {
+    border-right: none;
+  }
+}
+
+/* Un hijo de grid mide, por defecto, como mínimo lo que necesite su
+   contenido (igual que .panel en #tk-tiendas): sin esto, si el
+   encabezado no entra en el ancho que le toca (ver el bloque de abajo
+   sobre .tk-ficha-header-fila), en vez de desbordar PARA ADENTRO con
+   su propio scroll, empuja a la columna lateral y rompe las 2
+   columnas enteras. */
+.tk-ficha-cuerpo > * {
+  min-width: 0;
 }
 
 .tk-ficha-seccion + .tk-ficha-seccion {
@@ -1815,13 +1850,99 @@ main {
   gap: 12px;
 }
 
-@media (max-width: 820px) {
+/* ============================================
+   HISTORIAL (comentarios + eventos automáticos)
+   ============================================ */
+.tk-comentario-form textarea {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.tk-comentario-form textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tk-comentario-acciones {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.tk-comentario-tecnico {
+  max-width: 160px;
+}
+
+.tk-historial-lista {
+  margin-top: 20px;
+}
+
+.tk-evento + .tk-evento {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.tk-evento-cabecera {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.tk-evento-fecha {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.tk-evento-texto {
+  margin: 4px 0 0;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1100px) {
   .tk-ficha-cuerpo {
     grid-template-columns: 1fr;
   }
   .tk-ficha-lateral {
     position: static;
     max-height: none;
+  }
+}
+
+/* La grilla de 6 columnas de ancho fijo del encabezado (pensada para
+   pantallas grandes, donde alinea "Garantía" bajo "IPHONE 14 PRO",
+   etc.) necesita más ancho del que parece: aunque la ficha ya esté en
+   1 columna (ver arriba), en un iPad o una laptop/monitor más chico
+   esa columna completa sigue sin alcanzar. Este breakpoint es
+   deliberadamente más ancho que el de arriba — cubre tablets, laptops
+   y monitores chicos — y deja la fecha/hora fluir en vez de forzar
+   scroll horizontal; se pierde la alineación exacta entre renglones,
+   pero a esos anchos ya no se nota (cada dato queda en su propia
+   línea). Solo en monitores bien anchos se ve la grilla alineada. */
+@media (max-width: 1500px) {
+  .tk-ficha-header-fila {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+  }
+  .tk-ficha-header-fila > span:first-child {
+    white-space: normal;
+  }
+  .tk-ficha-header-espaciador {
+    display: none;
   }
 }
 

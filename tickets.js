@@ -54,6 +54,14 @@
   ];
   const BUCKET_FOTOS = "fotos-tickets";
 
+  // Ningún flujo (cambiar estado, comentar) tiene todavía un login
+  // por persona de verdad — todos los "técnico" de la app son
+  // selects manuales. Este es el mismo truco: un <select> en la caja
+  // de comentar que recuerda, en este navegador, quién fue la última
+  // persona que lo usó.
+  const TECNICO_ACTUAL_KEY = "catapu-tecnico-actual";
+  let tecnicoActual = localStorage.getItem(TECNICO_ACTUAL_KEY) || "";
+
   let esPrimeraCarga = true;
   let filasActuales = [];
 
@@ -135,9 +143,9 @@
     ].join("-");
   }
 
-  // 7 -> "T-0007"
+  // 7 -> "T-7"
   function numeroFormateado(numero) {
-    return "T-" + String(numero).padStart(4, "0");
+    return "T-" + numero;
   }
 
   // Fecha y hora de Ingreso/Entrega del encabezado van en columnas
@@ -323,7 +331,7 @@
       <div class="tk-fotos-panel" hidden>${renderizarFotos(urls)}</div>`;
   }
 
-  function renderizarDetalleTicket(f) {
+  function renderizarDetalleTicket(f, eventos) {
     // 5 columnas fijas, iguales en las 2 filas, para que "Garantía"
     // quede bajo "IPHONE 14 PRO", "B1-345" bajo el casillero vacío de
     // la 1ª fila, etc. — igual que el papel. La 1ª fila no tiene
@@ -363,6 +371,10 @@
       <section class="tk-ficha-seccion">
         <h4 class="tk-ficha-subtitulo">Informe Técnico</h4>
         ${f.informe_generado_en ? renderizarInformeReporte(f, fotosHtml) : renderizarInformeFormulario(f)}
+      </section>
+      <section class="tk-ficha-seccion">
+        <h4 class="tk-ficha-subtitulo">Historial</h4>
+        ${renderizarHistorial(f.id, eventos || [])}
       </section>`;
 
     const lateral = `
@@ -484,7 +496,139 @@
       ${campo("Técnico", f.tecnico)}`;
   }
 
-  function alternarDetalleTicket(filaTicket) {
+  // ----------------------------------------------------------
+  // Historial: eventos automáticos (creación, cambios de estado,
+  // informe técnico) + comentarios manuales con fotos. Todo vive en la
+  // tabla "ticket_eventos" (ver supabase/tickets_migracion_v6.sql).
+  // ----------------------------------------------------------
+  async function cargarEventos(ticketId) {
+    const { data, error } = await cliente
+      .from("ticket_eventos")
+      .select("*")
+      .eq("ticket_id", ticketId)
+      .order("creado", { ascending: true });
+    if (error) {
+      console.error(error);
+      return [];
+    }
+    return data;
+  }
+
+  // Errores acá van solo a consola: el historial es secundario, no
+  // debe hacer fallar ni avisar sobre la acción principal (crear el
+  // ticket, cambiar el estado, etc.) si falla solo el registro.
+  async function registrarEvento(ticketId, texto, autor, fotos) {
+    try {
+      const { error } = await cliente.from("ticket_eventos").insert({
+        ticket_id: ticketId,
+        texto: texto || null,
+        autor: autor || null,
+        fotos: fotos || [],
+      });
+      if (error) throw new Error(error.message);
+    } catch (error) {
+      console.error("No se pudo registrar el evento en el historial:", error);
+    }
+  }
+
+  function renderizarEventoHistorial(evento) {
+    const fotosHtml = evento.fotos && evento.fotos.length ? renderizarFotos(evento.fotos) : "";
+    return `
+      <div class="tk-evento">
+        <div class="tk-evento-cabecera">
+          <strong>${escaparHtml(evento.autor || "—")}</strong>
+          <span class="tk-evento-fecha">${escaparHtml(formatearFecha(evento.creado))} ${escaparHtml(formatearHora(evento.creado))}</span>
+        </div>
+        ${evento.texto ? `<p class="tk-evento-texto">${escaparHtml(evento.texto)}</p>` : ""}
+        ${fotosHtml}
+      </div>`;
+  }
+
+  function renderizarHistorial(ticketId, eventos) {
+    const opcionesTecnico = TECNICOS
+      .map((t) => `<option value="${escaparHtml(t)}" ${t === tecnicoActual ? "selected" : ""}>${escaparHtml(t)}</option>`)
+      .join("");
+    const lista = eventos.length
+      ? `<div class="tk-historial-lista">${eventos.map(renderizarEventoHistorial).join("")}</div>`
+      : `<p class="ranking-empty tk-historial-lista">Todavía no hay movimientos.</p>`;
+
+    return `
+      <form class="tk-comentario-form" data-id="${escaparHtml(ticketId)}">
+        <textarea class="tk-comentario-texto" rows="3" placeholder="Escribe un comentario…"></textarea>
+        <div class="tk-comentario-acciones">
+          <select class="tk-comentario-tecnico">
+            <option value="">Comentando como…</option>
+            ${opcionesTecnico}
+          </select>
+          <label class="btn-refresh tk-agregar-fotos-btn">
+            Agregar fotos
+            <input type="file" class="tk-comentario-fotos" accept="image/*" multiple hidden />
+          </label>
+          <button type="submit" class="btn-refresh">Guardar</button>
+          <span class="status-line tk-comentario-status"></span>
+        </div>
+      </form>
+      ${lista}`;
+  }
+
+  async function guardarComentario(formulario) {
+    const id = formulario.dataset.id;
+    const boton = formulario.querySelector('button[type="submit"]');
+    const status = formulario.querySelector(".tk-comentario-status");
+    const texto = formulario.querySelector(".tk-comentario-texto").value.trim();
+    const archivos = formulario.querySelector(".tk-comentario-fotos").files;
+
+    if (!texto && !archivos.length) {
+      status.textContent = "Escribe un comentario o agrega una foto.";
+      status.classList.add("is-error");
+      return;
+    }
+
+    boton.disabled = true;
+    status.classList.remove("is-error");
+    status.textContent = "Guardando…";
+
+    try {
+      let urls = [];
+      if (archivos.length) {
+        status.textContent = "Subiendo fotos…";
+        urls = await subirFotos(id, archivos);
+      }
+      // A diferencia de registrarEvento (que traga el error porque ahí
+      // el historial es secundario a la acción principal), acá SÍ hace
+      // falta que un error se vea: guardar el comentario es la acción
+      // principal de este formulario.
+      const { error } = await cliente.from("ticket_eventos").insert({
+        ticket_id: id,
+        texto: texto || null,
+        autor: tecnicoActual || null,
+        fotos: urls,
+      });
+      if (error) throw new Error(error.message);
+
+      await refrescarDetalleAbierto(id);
+    } catch (error) {
+      console.error(error);
+      status.textContent = "No se pudo guardar. (" + error.message + ")";
+      status.classList.add("is-error");
+      boton.disabled = false;
+    }
+  }
+
+  // Si el ticket que acaba de cambiar (estado, informe, comentario) es
+  // el que está abierto en #tk-detalle-contenedor, se vuelve a pedir
+  // su historial y se repinta entero — ya hace falta igual para
+  // mostrar el evento nuevo.
+  async function refrescarDetalleAbierto(id) {
+    if (id !== idTicketAbierto) return;
+    const f = filasActuales.find((fila) => fila.id === id);
+    if (!f) return;
+    const eventos = await cargarEventos(id);
+    if (id !== idTicketAbierto) return; // pudo cerrarse mientras tanto
+    ui.detalleContenedor.innerHTML = renderizarDetalleTicket(f, eventos);
+  }
+
+  async function alternarDetalleTicket(filaTicket) {
     const id = filaTicket.dataset.id;
 
     // Clic en la fila que ya estaba abierta: se cierra.
@@ -507,9 +651,13 @@
     filaTicket.setAttribute("aria-expanded", "true");
     idTicketAbierto = id;
     filaTicketActiva = filaTicket;
-    ui.detalleContenedor.innerHTML = renderizarDetalleTicket(f);
     ui.detalleContenedor.hidden = false;
+    ui.detalleContenedor.innerHTML = '<p class="status-line">Cargando…</p>';
     ui.detalleContenedor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    const eventos = await cargarEventos(id);
+    if (id !== idTicketAbierto) return; // se hizo clic en otro ticket mientras tanto
+    ui.detalleContenedor.innerHTML = renderizarDetalleTicket(f, eventos);
   }
 
   // Fila de la tabla: solo muestra el estado (como Garantías), no se
@@ -565,22 +713,20 @@
 
       if (fila) Object.assign(fila, datos);
 
-      // El cambio se hace desde el <select> del panel del detalle, pero
-      // la insignia de solo lectura de la fila de la tabla (mismo
-      // ticket) también debe quedar al día — se actualiza a mano en vez
-      // de repintar toda la tabla (eso cerraría cualquier detalle que
-      // el usuario tenga abierto).
-      select.className = `select-estado-ticket badge-estado ${claseEstado(estado)}`;
+      // La insignia de solo lectura de la fila de la tabla (mismo
+      // ticket) debe quedar al día — se actualiza a mano en vez de
+      // repintar toda la tabla (eso cerraría cualquier detalle que el
+      // usuario tenga abierto).
       document.querySelectorAll(`.badge-estado-ticket[data-id="${id}"]`).forEach((badge) => {
         badge.textContent = estado;
         badge.className = `badge-estado-ticket badge-estado ${claseEstado(estado)}`;
       });
-      if (datos.entregado_en) {
-        const spanEntregaFecha = document.querySelector(`.tk-ficha-entrega[data-id="${id}"]`);
-        if (spanEntregaFecha) spanEntregaFecha.textContent = formatearFecha(datos.entregado_en);
-        const spanEntregaHora = document.querySelector(`.tk-ficha-entrega-hora[data-id="${id}"]`);
-        if (spanEntregaHora) spanEntregaHora.textContent = formatearHora(datos.entregado_en);
-      }
+
+      await registrarEvento(id, `Cambió el estado a "${estado}".`, tecnicoActual);
+      // Repinta el detalle entero si es el que está abierto (el select
+      // de estado de ahí adentro queda con el valor correcto solo, y
+      // de paso aparece el evento nuevo en el historial).
+      await refrescarDetalleAbierto(id);
     } catch (error) {
       console.error(error);
       alert("No se pudo actualizar el estado. (" + error.message + ")");
@@ -706,9 +852,13 @@
       const fila = filasActuales.find((f) => f.id === id);
       if (fila) Object.assign(fila, data);
 
+      await registrarEvento(id, "Creó el informe técnico.", datos.tecnico || tecnicoActual);
+
       // Repinta el detalle compartido, para pasar del formulario al
-      // reporte de solo lectura sin cerrar ni recargar el resto.
-      ui.detalleContenedor.innerHTML = renderizarDetalleTicket(fila || data);
+      // reporte de solo lectura sin cerrar ni recargar el resto (y de
+      // paso mostrar el evento nuevo en el historial).
+      const eventos = await cargarEventos(id);
+      ui.detalleContenedor.innerHTML = renderizarDetalleTicket(fila || data, eventos);
     } catch (error) {
       console.error(error);
       status.textContent = "No se pudo guardar. (" + error.message + ")";
@@ -804,6 +954,8 @@
         }
       }
 
+      await registrarEvento(ticketCreado.id, "Creó el ticket.", datos.tecnico || tecnicoActual);
+
       limpiarFormulario();
       mostrarFormulario(false);
 
@@ -872,6 +1024,12 @@
     const select = casilla.closest(".select-estado-ticket");
     if (select) return cambiarEstado(select);
 
+    if (casilla.classList.contains("tk-comentario-tecnico")) {
+      tecnicoActual = casilla.value;
+      localStorage.setItem(TECNICO_ACTUAL_KEY, tecnicoActual);
+      return;
+    }
+
     if (casilla.classList.contains("tk-alerta-toggle")) {
       cliente.from("tickets").update({ alerta_correo: casilla.checked }).eq("id", casilla.dataset.id)
         .then(({ error }) => {
@@ -909,10 +1067,17 @@
   });
 
   uiContenido.addEventListener("submit", (evento) => {
-    const formulario = evento.target.closest(".tk-informe-form");
-    if (!formulario) return;
-    evento.preventDefault();
-    guardarInforme(formulario);
+    const formularioInforme = evento.target.closest(".tk-informe-form");
+    if (formularioInforme) {
+      evento.preventDefault();
+      return guardarInforme(formularioInforme);
+    }
+
+    const formularioComentario = evento.target.closest(".tk-comentario-form");
+    if (formularioComentario) {
+      evento.preventDefault();
+      return guardarComentario(formularioComentario);
+    }
   });
 
   // El clic para abrir/cerrar una fila no debe interferir con el

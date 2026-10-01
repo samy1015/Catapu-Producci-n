@@ -112,6 +112,32 @@ create policy "logueados pueden ver fotos de tickets" on storage.objects
   for select to authenticated using (bucket_id = 'fotos-tickets');
 
 -- ------------------------------------------------------------
+-- Historial del ticket: comentarios y eventos automáticos (creación,
+-- cambios de estado, informe técnico). Registro de solo-agregar, no se
+-- edita ni se borra desde la web.
+-- ------------------------------------------------------------
+create table if not exists ticket_eventos (
+  id uuid primary key default gen_random_uuid(),
+  ticket_id uuid not null references tickets(id) on delete cascade,
+  autor text check (autor is null or autor in (
+    'Víctor A.', 'Mario L.', 'Samy B.', 'Bruce M.', 'Pierre B.', 'Jhon R.', 'Hermes R.'
+  )),
+  texto text,
+  fotos text[] not null default '{}',
+  creado timestamptz not null default now()
+);
+
+create index if not exists ticket_eventos_ticket_id_idx on ticket_eventos(ticket_id);
+
+alter table ticket_eventos enable row level security;
+
+create policy "logueados pueden leer eventos" on ticket_eventos
+  for select to authenticated using (true);
+
+create policy "logueados pueden crear eventos" on ticket_eventos
+  for insert to authenticated with check (true);
+
+-- ------------------------------------------------------------
 -- Clave compartida para los Apps Script de solo lectura (Producción,
 -- Reparación, Garantías, Correos) — no usan Supabase, así que cada uno
 -- valida esta misma clave en su doGet() antes de responder cualquier
