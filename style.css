@@ -663,7 +663,7 @@ main {
   }
 }
 
-/* Modelos con colores desplegables (Producción) y detalle de ticket
+/* Modelos con colores desplegables (Producción) y fila de ticket
    (Tickets) comparten el mismo patrón de "fila clicable con flecha". */
 .fila-modelo,
 .fila-ticket {
@@ -689,10 +689,94 @@ main {
   color: var(--accent);
 }
 
-.fila-colores td,
-.fila-detalle-ticket td {
+/* Modelos (Producción): la lista de colores va indentada bajo la
+   flecha, por eso el margen izquierdo es más grande que el derecho. */
+.fila-colores td {
   background: var(--panel-alt);
   padding: 10px 8px 12px 28px;
+}
+
+/* Tickets ya no usa <table>: cada tienda es una lista simple de filas
+   compactas (Estado, Ticket, Razón, Fecha) — al hacer clic se
+   despliega la ficha completa debajo (mismo margen a los 2 lados). */
+/* flex-wrap: wrap — con 3 tarjetas por fila, cada una mide 1/3 de la
+   pantalla: si la razón es larga ("Garantía - Repuestos / Reparación")
+   y no entra junto al resto en una sola línea, la fecha pasa a su
+   propia línea en vez de cortarse o desbordar la tarjeta. */
+.fila-ticket {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  font-size: 12.5px;
+}
+
+.fila-ticket:hover {
+  background: var(--panel-alt);
+}
+
+.tk-fila-numero {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* nowrap + ellipsis en vez de dejarla partirse en 2 líneas: así todas
+   las filas miden siempre lo mismo de alto, sin importar si la razón
+   es corta ("Servicio técnico") o larga ("Garantía - Repuestos /
+   Reparación") — esta última se trunca con "…" en vez de estirar la
+   fila; el texto completo se sigue viendo en la ficha del detalle. */
+.tk-fila-razon {
+  flex: 1 1 110px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tk-fila-fecha {
+  color: var(--text-dim);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+/* Las 3 sedes de Tickets van una al lado de la otra (no apiladas como
+   Garantías): cada tienda es su propia tarjeta. "align-items: start"
+   evita que las 3 se estiren a la altura de la más alta cuando una
+   tiene un ticket desplegado adentro. */
+#tk-tiendas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  /* align-items por defecto (stretch): las 3 tarjetas quedan de la
+     misma altura (la de la más alta), aunque alguna sede no tenga
+     tickets o uno de los tickets esté desplegado. */
+}
+
+/* La ficha del ticket en el que se hizo clic, debajo de las 3 sedes. */
+#tk-detalle-contenedor {
+  margin-top: 20px;
+}
+
+/* Un <section> como hijo de grid mide, por defecto, al menos lo que
+   necesite su contenido (min-width: auto) — eso hacía que la tarjeta
+   con más tickets se agrandara más que las otras 2 e incluso
+   desbordara la página. Con min-width: 0 respeta el 1/3 que le toca y
+   el contenido que no entre se acomoda adentro (ver .fila-ticket). */
+/* height: 100% a propósito (no solo confiar en align-items: stretch):
+   .panel tiene overflow-x: auto, y eso puede hacer que el navegador no
+   la estire del todo sola dentro de la grilla. Con alto explícito al
+   100% de su fila, las 3 miden siempre lo mismo sin importar cuántos
+   tickets tenga cada una. */
+#tk-tiendas > .panel {
+  min-width: 0;
+  height: 100%;
+}
+
+@media (max-width: 1100px) {
+  #tk-tiendas {
+    grid-template-columns: 1fr;
+  }
 }
 
 .lista-colores {
@@ -1167,7 +1251,8 @@ main {
   accent-color: var(--accent);
 }
 
-#tk-f-fotos {
+#tk-f-fotos,
+.tk-informe-fotos {
   color: var(--text-dim);
   font-size: 12.5px;
 }
@@ -1192,6 +1277,7 @@ main {
 }
 
 .tk-form-falla textarea {
+  width: 100%;
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--text);
@@ -1259,7 +1345,8 @@ main {
    que pone auth.js pierde contra el display de acá y el elemento se ve
    igual, aunque JS lo haya marcado como oculto. */
 .login-pantalla[hidden],
-.app-shell[hidden] {
+.app-shell[hidden],
+.tk-lightbox[hidden] {
   display: none;
 }
 
@@ -1300,4 +1387,482 @@ main {
 .login-caja .status-line {
   margin: 0;
   text-align: center;
+}
+
+/* ============================================
+   FICHA DE TICKET (detalle con Informe Técnico)
+   ============================================ */
+/* Recuadro con el número de ticket "cortando" el borde superior, como
+   la leyenda de un <fieldset> — mismo truco que .tk-ficha-recuadro de
+   más abajo (Diagnóstico/Observaciones/Técnico). */
+.tk-ficha-header {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 16px 16px 14px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tk-ficha-numero {
+  position: absolute;
+  top: -10px;
+  left: 14px;
+  background: var(--panel-alt);
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* 6 columnas de ancho FIJO (ninguna max-content/auto): cada fila es su
+   propia grilla (son 2 <div> separados), y solo con anchos fijos,
+   iguales en las 2, quedan alineados entre sí modelo/tipo,
+   sede/técnico, vacío/comprobante y el bloque fecha+hora — con
+   max-content/auto cada fila mediría sus columnas según su propio
+   texto (ej. "Pendiente" vs una fecha, o sin hora en "Entrega") y se
+   desalinearían entre sí. La 4ª columna es un espaciador vacío que se
+   queda con todo el ancho sobrante (1fr): así el bloque Ingreso/Entrega
+   + fecha + hora queda pegado al borde derecho en vez de quedar
+   flotando con espacio vacío después. */
+.tk-ficha-header-fila {
+  display: grid;
+  grid-template-columns: 230px 170px 80px 1fr 170px 90px;
+  column-gap: 18px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+/* Modelo/Razón ("Garantía - Equipo CATAPU", "Garantía - Repuestos /
+   Reparación", etc.) en una sola línea, no 2 — la columna ya mide lo
+   suficiente para el texto más largo de la lista. */
+.tk-ficha-header-fila > span:first-child {
+  white-space: nowrap;
+}
+
+.tk-ficha-header-espaciador {
+  min-width: 0;
+}
+
+.tk-ficha-header-fila + .tk-ficha-header-fila {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.tk-ficha-modelo {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tk-ficha-fecha-campo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* La fecha se ve como un campo de fecha deshabilitado (recuadro),
+   igual que "Fecha de hoy" del formulario de alta; la hora al lado va
+   en texto plano, sin recuadro. */
+.tk-ficha-fecha-caja {
+  display: inline-block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 3px 9px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.tk-ficha-hora {
+  color: var(--text);
+}
+
+/* Columna principal (falla + informe) y columna lateral (estado +
+   datos, que se queda a la vista mientras se hace scroll) en
+   proporción ~58/42, como en el mockup — no un lateral angosto de
+   ancho fijo que se encoge cuando la principal crece. */
+.tk-ficha-cuerpo {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.tk-ficha-seccion + .tk-ficha-seccion {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.tk-ficha-subtitulo {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.tk-ficha-texto {
+  font-size: 13px;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.tk-ficha-campo-simple + .tk-ficha-campo-simple {
+  margin-top: 14px;
+}
+
+.tk-ficha-lateral {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Alerta de correo + estado en la misma fila, arriba del todo. */
+.tk-ficha-top-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tk-ficha-alerta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Filas "etiqueta :  valor" de Datos del cliente/del equipo: una sola
+   grilla de 2 columnas por grupo (.tk-datos-grid), así todas las filas
+   quedan alineadas aunque el largo de cada etiqueta varíe. Cada fila
+   (.tk-dato-fila) usa display:contents para "desaparecer" y dejar que
+   su etiqueta/valor sean los que ocupan esas 2 columnas directamente. */
+.tk-datos-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  row-gap: 6px;
+  font-size: 12.5px;
+}
+
+.tk-dato-fila {
+  display: contents;
+}
+
+.tk-dato-label {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tk-dato-valor {
+  color: var(--text);
+  text-align: left;
+}
+
+.tk-dato-bloque {
+  margin-top: 10px;
+}
+
+/* Línea antes de "Accesorios recibidos", como en el mockup. */
+.tk-dato-bloque--divisor {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* Línea entre "Datos del cliente" y "Datos del equipo". */
+.tk-datos-grupo + .tk-datos-grupo {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* Accesorios recibidos / ¿Pudo ser probado? — lista con viñetas,
+   opcionalmente en 2 columnas. */
+.tk-lista-bullets {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 12.5px;
+}
+
+.tk-lista-bullets li {
+  padding-left: 14px;
+  position: relative;
+}
+
+.tk-lista-bullets li::before {
+  content: "·";
+  position: absolute;
+  left: 2px;
+  color: var(--text-dim);
+}
+
+.tk-lista-bullets--col2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 10px;
+}
+
+/* Interruptor tipo píldora (checkbox real escondido debajo, para que
+   siga siendo accesible por teclado). */
+.tk-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.tk-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.tk-switch-carril {
+  position: absolute;
+  inset: 0;
+  background: var(--line);
+  border-radius: 999px;
+  pointer-events: none;
+  transition: background 0.15s ease;
+}
+
+.tk-switch-carril::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--panel);
+  transition: transform 0.15s ease;
+}
+
+.tk-switch input:checked + .tk-switch-carril {
+  background: var(--good);
+}
+
+.tk-switch input:checked + .tk-switch-carril::before {
+  transform: translateX(16px);
+}
+
+.tk-switch input:focus-visible + .tk-switch-carril {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Casilla "Otro" del checklist de conclusión, con su caja de texto al
+   lado (deshabilitada hasta que se marque la casilla). */
+.tk-check-otro {
+  align-items: center;
+}
+
+.tk-conclusion-otro {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.tk-conclusion-otro:disabled {
+  opacity: 0.5;
+}
+
+/* Las miniaturas dejaron de ser enlaces: ahora abren el lightbox. */
+.tk-foto-mini {
+  cursor: pointer;
+}
+
+/* "Fotos" se ve como un campo más (barra con flecha) que se despliega
+   al hacer clic, en vez de mostrar las miniaturas siempre. */
+.tk-fotos-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: auto;
+  min-width: 110px;
+  margin-top: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tk-fotos-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tk-fotos-toggle .chevron {
+  transition: transform 0.15s ease;
+}
+
+.tk-fotos-toggle[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+.tk-fotos-panel {
+  margin-top: 8px;
+}
+
+/* Recuadro con la etiqueta "cortando" el borde superior, como la
+   leyenda de un <fieldset> (Diagnóstico/Observaciones/Técnico del
+   Informe Técnico) — mismo truco que .tk-ficha-header de más arriba. */
+.tk-ficha-recuadro {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 14px 12px 10px;
+}
+
+.tk-ficha-recuadro + .tk-ficha-recuadro,
+.tk-ficha-conclusion-header {
+  margin-top: 16px;
+}
+
+.tk-ficha-recuadro-titulo {
+  position: absolute;
+  top: -9px;
+  left: 10px;
+  background: var(--panel-alt);
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/* El textarea/select de adentro no necesita su propio borde/fondo: ya
+   los tiene el recuadro que lo envuelve. */
+.tk-ficha-recuadro textarea,
+.tk-ficha-recuadro select {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 0;
+  resize: vertical;
+}
+
+.tk-ficha-recuadro textarea:focus,
+.tk-ficha-recuadro select:focus {
+  outline: none;
+}
+
+.tk-ficha-tecnico-recuadro {
+  width: 170px;
+  flex-shrink: 0;
+}
+
+.tk-ficha-tecnico-recuadro select {
+  cursor: pointer;
+}
+
+.tk-ficha-conclusion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tk-agregar-fotos-btn {
+  cursor: pointer;
+}
+
+.tk-ficha-informe-footer {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.tk-ficha-informe-footer-acciones {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 820px) {
+  .tk-ficha-cuerpo {
+    grid-template-columns: 1fr;
+  }
+  .tk-ficha-lateral {
+    position: static;
+    max-height: none;
+  }
+}
+
+/* ============================================
+   LIGHTBOX DE FOTOS (Tickets)
+   ============================================ */
+.tk-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.tk-lightbox img {
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.tk-lightbox-cerrar {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#tk-lightbox-descargar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
 }

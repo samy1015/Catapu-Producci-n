@@ -26,9 +26,18 @@ create table if not exists tickets (
   -- graba este.
   tienda text not null check (tienda in ('Caminos del Inca', 'Miraflores', 'Taller')),
   fecha date not null default current_date,
-  estado text not null default 'Ingresado' check (
-    estado in ('Ingresado', 'En diagnóstico', 'En reparación', 'Listo para entrega', 'Entregado', 'Cancelado')
-  ),
+  estado text not null default 'Ingresado' check (estado in (
+    'Ingresado', 'En diagnóstico', 'Presupuesto enviado', 'Aprobado por el cliente',
+    'En reparación', 'Reparado', 'No presentó fallas', 'Entregado',
+    'No reparado/Irreparable', 'Garantía anulada', 'Presupuesto no aprobado',
+    'Cambio de equipo o reembolso', 'Cambio de equipo', 'Reembolso'
+  )),
+  -- Se llena sola (tickets.js) la primera vez que el estado pasa a
+  -- "Entregado"; nunca se borra aunque el estado cambie después.
+  entregado_en timestamptz,
+  -- Activa/desactiva el aviso por correo al cliente. Todavía no
+  -- dispara ningún correo real, solo se guarda para más adelante.
+  alerta_correo boolean not null default true,
 
   -- Datos del cliente
   nombres text,
@@ -52,6 +61,15 @@ create table if not exists tickets (
   ),
   -- URLs públicas de las fotos ya subidas al bucket "fotos-tickets".
   fotos text[] not null default '{}',
+
+  -- Informe Técnico: se redacta una sola vez desde el detalle del
+  -- ticket. Mientras "informe_generado_en" sea null, el panel muestra
+  -- el formulario de redacción; una vez tiene fecha, muestra el
+  -- reporte de solo lectura.
+  informe_diagnostico text,
+  informe_observaciones text,
+  informe_conclusion text,
+  informe_generado_en timestamptz,
 
   notas text,
   creado timestamptz not null default now(),

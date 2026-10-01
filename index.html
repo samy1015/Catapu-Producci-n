@@ -44,6 +44,15 @@
     </form>
   </div>
 
+  <!-- ============ LIGHTBOX DE FOTOS (Tickets) ============ -->
+  <!-- Uno solo, compartido por todos los tickets: tickets.js lo llena
+       y lo muestra al hacer clic en cualquier miniatura. -->
+  <div class="tk-lightbox" id="tk-lightbox" hidden>
+    <button class="tk-lightbox-cerrar" id="tk-lightbox-cerrar" type="button" aria-label="Cerrar">✕</button>
+    <img id="tk-lightbox-img" alt="Foto ampliada" />
+    <a id="tk-lightbox-descargar" class="btn-refresh" download>Descargar</a>
+  </div>
+
   <div class="app-shell" id="app-shell" hidden>
 
     <!-- ============ BARRA LATERAL ============ -->
@@ -477,6 +486,12 @@
         <div id="tk-tiendas">
           <!-- Un bloque por tienda, generado por tickets.js -->
         </div>
+
+        <!-- Detalle del ticket en el que se hizo clic (una sola tarjeta
+             compartida por las 3 sedes, no adentro de cada columna
+             angosta: la ficha necesita más ancho del que da un tercio
+             de la pantalla). -->
+        <section class="panel panel-wide" id="tk-detalle-contenedor" hidden></section>
       </main>
 
       <footer class="footer">
