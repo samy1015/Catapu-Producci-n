@@ -54,6 +54,11 @@
   ];
   const BUCKET_FOTOS = "fotos-tickets";
 
+  // Apps Script (cuenta pruebacatapu10@gmail.com) que genera el PDF de
+  // "Orden de Ingreso" y lo manda por correo al crear un ticket, o lo
+  // sirve directo para descargar. Ver apps-script/orden-ingreso.gs.
+  const ORDEN_INGRESO_URL = "https://script.google.com/macros/s/AKfycbw7-6ybyiw8Oghc3o-dPkb6JhRzObPFe4fqtmpX_TWz2apoaS-U_OkkgskAuelU0lY7NQ/exec";
+
   // Ningún flujo (cambiar estado, comentar) tiene todavía un login
   // por persona de verdad — todos los "técnico" de la app son
   // selects manuales. Este es el mismo truco: un <select> en la caja
@@ -340,6 +345,10 @@
     const encabezado = `
       <div class="tk-ficha-header">
         <span class="tk-ficha-numero">${escaparHtml(numeroFormateado(f.numero))}</span>
+        <a class="tk-ficha-descargar-pdf" target="_blank" rel="noopener"
+           href="${ORDEN_INGRESO_URL}?accion=descargar&id=${encodeURIComponent(f.id)}&clave=${encodeURIComponent(window.claveAppsScript || "")}">
+          Descargar orden
+        </a>
         <div class="tk-ficha-header-fila">
           <span class="tk-ficha-modelo">${escaparHtml(f.modelo || "—")}</span>
           <span>${escaparHtml(TIENDAS_NOMBRE_LARGO[f.tienda] || f.tienda)}</span>
@@ -529,6 +538,24 @@
     } catch (error) {
       console.error("No se pudo registrar el evento en el historial:", error);
     }
+  }
+
+  // Dispara el correo de "Orden de Ingreso" (PDF adjunto) para un
+  // ticket recién creado. Igual que registrarEvento, no debe hacer
+  // fallar el alta del ticket si algo sale mal acá — a diferencia de
+  // registrarEvento, sí devuelve el mensaje de error para que
+  // crearTicket pueda avisarlo en pantalla (el técnico necesita saber
+  // si el cliente no va a recibir el correo).
+  async function enviarOrdenIngreso(ticketId) {
+    try {
+      const url = `${ORDEN_INGRESO_URL}?accion=enviar&id=${encodeURIComponent(ticketId)}`;
+      const respuesta = await cargarViaJSONP(url);
+      if (respuesta.error) throw new Error(respuesta.error);
+    } catch (error) {
+      console.error("No se pudo enviar la orden de ingreso:", error);
+      return error.message;
+    }
+    return null;
   }
 
   function renderizarEventoHistorial(evento) {
@@ -956,6 +983,14 @@
 
       await registrarEvento(ticketCreado.id, "Creó el ticket.", datos.tecnico || tecnicoActual);
 
+      // Si el correo de la orden de ingreso falla, el ticket ya quedó
+      // creado igual — solo avisamos, no deshacemos el alta por eso
+      // (mismo criterio que con las fotos, arriba).
+      const errorOrden = await enviarOrdenIngreso(ticketCreado.id);
+      const avisoOrden = errorOrden
+        ? ` (no se pudo enviar el correo de la orden de ingreso: ${errorOrden})`
+        : "";
+
       limpiarFormulario();
       mostrarFormulario(false);
 
@@ -968,7 +1003,7 @@
         filasActuales.unshift(ticketCreado);
         pintar(filasActuales);
       }
-      ui.status.textContent = `Ticket ${numeroFormateado(ticketCreado.numero)} creado.${avisoFotos}`;
+      ui.status.textContent = `Ticket ${numeroFormateado(ticketCreado.numero)} creado.${avisoFotos}${avisoOrden}`;
     } catch (error) {
       console.error(error);
       ui.formStatus.textContent = "No se pudo guardar. (" + error.message + ")";

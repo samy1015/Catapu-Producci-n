@@ -224,7 +224,7 @@ input[type="date"], select, .search-box {
   border: 1px solid var(--line);
   color: var(--text);
   padding: 7px 10px;
-  border-radius: 3px;
+  border-radius: 10px;
   font-family: var(--font-mono);
   font-size: 13px;
 }
@@ -239,7 +239,7 @@ input[type="date"]:focus, select:focus, .search-box:focus {
   border: 1px solid var(--line);
   color: var(--text);
   padding: 8px 14px;
-  border-radius: 3px;
+  border-radius: 10px;
   font-family: var(--font-display);
   font-size: 13px;
   cursor: pointer;
@@ -363,9 +363,10 @@ main {
 }
 
 .panel {
+  margin: 0 auto 48px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 10px;
   padding: 18px 20px 20px;
   overflow-x: auto; /* si una tabla no cabe en pantallas angostas, se desliza dentro del panel en vez de romper el layout */
 }
@@ -755,7 +756,7 @@ main {
 
 /* La ficha del ticket en el que se hizo clic, debajo de las 3 sedes. */
 #tk-detalle-contenedor {
-  margin-top: 20px;
+  margin-top: 40px;
   /* .panel trae overflow-x: auto, y fijar un overflow fuerza al otro
      eje a dejar de ser "visible" — eso convierte a este panel en el
      "ancestro con scroll" más cercano para position: sticky, aunque
@@ -763,6 +764,7 @@ main {
      ficha (.tk-ficha-lateral) deja de poder pegarse a la ventana real.
      body ya tiene overflow-x: hidden como red de seguridad general. */
   overflow-x: visible;
+  padding: 20px;
 }
 
 /* Un <section> como hijo de grid mide, por defecto, al menos lo que
@@ -778,6 +780,7 @@ main {
 #tk-tiendas > .panel {
   min-width: 0;
   height: 100%;
+  border-radius: 15px;
 }
 
 @media (max-width: 1100px) {
@@ -1429,6 +1432,23 @@ main {
   color: var(--accent);
   font-weight: 600;
   font-size: 20px;
+}
+
+.tk-ficha-descargar-pdf {
+  position: absolute;
+  top: -10px;
+  right: 14px;
+  background: var(--panel-alt);
+  padding: 0 6px;
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tk-ficha-descargar-pdf:hover {
+  text-decoration: underline;
 }
 
 /* 6 columnas de ancho FIJO (ninguna max-content/auto): cada fila es su
