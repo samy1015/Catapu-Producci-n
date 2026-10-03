@@ -1451,6 +1451,24 @@ main {
   text-decoration: underline;
 }
 
+.tk-ficha-titulo-fila {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.tk-ficha-descargar-link {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tk-ficha-descargar-link:hover {
+  text-decoration: underline;
+}
+
 /* 6 columnas de ancho FIJO (ninguna max-content/auto): cada fila es su
    propia grilla (son 2 <div> separados), y solo con anchos fijos,
    iguales en las 2, quedan alineados entre sí modelo/tipo,

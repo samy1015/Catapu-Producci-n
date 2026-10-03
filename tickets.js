@@ -498,6 +498,12 @@
         <p class="tk-ficha-texto">${escaparHtml(valor || "—")}</p>
       </div>`;
     return `
+      <div class="tk-ficha-titulo-fila">
+        <a class="tk-ficha-descargar-link" target="_blank" rel="noopener"
+           href="${ORDEN_INGRESO_URL}?accion=descargar&tipo=informe&id=${encodeURIComponent(f.id)}&clave=${encodeURIComponent(window.claveAppsScript || "")}">
+          Descargar informe
+        </a>
+      </div>
       ${campo("Diagnóstico Técnico", f.informe_diagnostico)}
       ${campo("Observaciones", f.informe_observaciones)}
       ${fotosHtml}
@@ -553,6 +559,20 @@
       if (respuesta.error) throw new Error(respuesta.error);
     } catch (error) {
       console.error("No se pudo enviar la orden de ingreso:", error);
+      return error.message;
+    }
+    return null;
+  }
+
+  // Mismo patrón que enviarOrdenIngreso, pero para el Informe Técnico
+  // (mismo Apps Script, &tipo=informe elige la otra plantilla/correo).
+  async function enviarInformeTecnico(ticketId) {
+    try {
+      const url = `${ORDEN_INGRESO_URL}?accion=enviar&tipo=informe&id=${encodeURIComponent(ticketId)}`;
+      const respuesta = await cargarViaJSONP(url);
+      if (respuesta.error) throw new Error(respuesta.error);
+    } catch (error) {
+      console.error("No se pudo enviar el correo del informe técnico:", error);
       return error.message;
     }
     return null;
@@ -880,6 +900,14 @@
       if (fila) Object.assign(fila, data);
 
       await registrarEvento(id, "Creó el informe técnico.", datos.tecnico || tecnicoActual);
+
+      // Si el correo del informe falla, el informe ya quedó guardado
+      // igual — solo avisamos, no deshacemos el guardado por eso
+      // (mismo criterio que con la Orden de Ingreso, en crearTicket).
+      const errorInforme = await enviarInformeTecnico(id);
+      if (errorInforme) {
+        ui.status.textContent = `No se pudo enviar el correo del informe técnico: ${errorInforme}`;
+      }
 
       // Repinta el detalle compartido, para pasar del formulario al
       // reporte de solo lectura sin cerrar ni recargar el resto (y de

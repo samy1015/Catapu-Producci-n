@@ -6,13 +6,18 @@
 // GmailApp solo puede mandar correos de la cuenta que lo ejecuta).
 //
 // Qué hace: dado el id de un ticket, lo busca directo en Supabase (sin
-// pasar por el navegador) y arma un PDF "Orden de Ingreso" con el
-// mismo diseño que usa el formulario en papel. Dos acciones por
-// ?accion=:
+// pasar por el navegador) y arma un PDF — "Orden de Ingreso" o
+// "Informe Técnico", según ?tipo=. Dos acciones por ?accion= (se
+// combinan con ?tipo=):
 //   enviar     -> genera el PDF y lo manda por correo al cliente +
 //                 copia de respaldo interna. Responde JSON (JSONP).
 //   descargar  -> genera el PDF y lo devuelve directo como archivo
 //                 para descargar (no manda ningún correo).
+// ?tipo=ingreso (o sin tipo) -> Orden de Ingreso (funciones de este
+//   mismo archivo). ?tipo=informe -> Informe Técnico (funciones en
+//   apps-script/informe-tecnico.gs, agregado como SEGUNDO archivo
+//   dentro de este mismo proyecto — comparten namespace global, así
+//   que el doGet de acá las puede llamar directo).
 //
 // Para no depender de que el navegador mande todos los datos del
 // ticket por la URL (fotos, falla, accesorios...), este script lee el
@@ -66,10 +71,15 @@ function doGet(e) {
     return responderError("Ticket no encontrado.", params.callback);
   }
 
+  // tipo=informe -> Informe Técnico (apps-script/informe-tecnico.gs,
+  // mismo proyecto); sin tipo o tipo=ingreso -> Orden de Ingreso
+  // (las funciones de más abajo, en este mismo archivo).
+  const esInforme = params.tipo === "informe";
+
   if (params.accion === "descargar") {
     try {
-      const pdf = generarPdf(ticket);
-      pdf.setName(`Orden-Ingreso-T-${ticket.numero}.pdf`);
+      const pdf = esInforme ? generarPdfInforme(ticket) : generarPdf(ticket);
+      pdf.setName(`${esInforme ? "Informe-Tecnico" : "Orden-Ingreso"}-T-${ticket.numero}.pdf`);
       return pdf; // Apps Script sirve un Blob devuelto desde doGet como descarga directa.
     } catch (err) {
       return responderError(String(err.message || err), params.callback);
@@ -78,7 +88,11 @@ function doGet(e) {
 
   // accion === "enviar" (o sin accion, por si acaso)
   try {
-    enviarCorreo(ticket);
+    if (esInforme) {
+      enviarCorreoInforme(ticket);
+    } else {
+      enviarCorreo(ticket);
+    }
     return responder(JSON.stringify({ ok: true }), params.callback);
   } catch (err) {
     return responderError(String(err.message || err), params.callback);
