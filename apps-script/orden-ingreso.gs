@@ -155,12 +155,71 @@ function enviarCorreo(ticket) {
   GmailApp.sendEmail(
     destinatarios,
     `Orden de Ingreso — Ticket T-${ticket.numero}`,
+    // Texto plano de respaldo, para clientes de correo que no muestran HTML.
     `Se adjunta la orden de ingreso del equipo (T-${ticket.numero}).`,
     {
+      htmlBody: plantillaCorreoHtml(ticket),
       attachments: [pdf],
       name: "Catapu Servicio Técnico",
     }
   );
+}
+
+// ------------------------------------------------------------
+// Cuerpo del correo (tabla "etiqueta: valor", igual al formato que ya
+// mandaba JotForm — el cliente la ve directo en la bandeja de entrada,
+// sin tener que abrir el PDF adjunto).
+// ------------------------------------------------------------
+function plantillaCorreoHtml(t) {
+  const sede = TIENDAS_NOMBRE_LARGO[t.tienda] || t.tienda || "—";
+  const nombreCompleto = [t.nombres, t.apellidos].filter(Boolean).join(" ") || "—";
+  const accesorios = (t.accesorios && t.accesorios.length) ? t.accesorios.join("<br/>") : "Ninguno";
+  const correoHtml = t.correo ? `<a href="mailto:${escaparHtml(t.correo)}">${escaparHtml(t.correo)}</a>` : "—";
+
+  const filas = [
+    ["Razón de ingreso:", escaparHtml(t.tipo || "—")],
+    ["Sede de ingreso:", escaparHtml(sede)],
+    ["Numero de ticket:", `<b>T-${escaparHtml(String(t.numero))}</b>`],
+    ["Nombre:", escaparHtml(nombreCompleto)],
+    ["Número de Teléfono:", escaparHtml(t.telefono || "—")],
+    ["Correo Electrónico:", correoHtml],
+    ["Marca, Modelo, etc:", escaparHtml(t.modelo || "—")],
+    ["IMEI / Código de Serie:", escaparHtml(t.imei || "—")],
+    ["Contra (Si posee):", escaparHtml(t.contrasena || "—")],
+    ["Descripción de Fallas / Problemas mencionado por el cliente:", escaparHtml(t.falla || "—")],
+    ["Fecha Estimada de Entrega:", escaparHtml(t.fecha_entrega_estimada || "—")],
+    ["Accesorios recibidos con el equipo:", accesorios],
+    ["¿Pudo ser probado el equipo?", escaparHtml(t.probado || "—")],
+    ["Numero de comprobante:", escaparHtml(t.comprobante || "—")],
+    ["Fecha de comprobante:", escaparHtml(t.fecha_compra || "—")],
+    ["Responsable del registro:", escaparHtml(t.tecnico || "—")],
+  ];
+
+  return filaTablaCorreo("🔧 Recepción de Equipos CATAPU", filas);
+}
+
+// Reutilizada también por informe-tecnico.gs (mismo look de tabla,
+// distinto título y distintas filas).
+function filaTablaCorreo(titulo, filas) {
+  const filasHtml = filas
+    .map(
+      ([etiqueta, valor], indice) => `
+      <tr style="background:${indice % 2 === 0 ? "#f7f8f9" : "#ffffff"};">
+        <td style="padding:9px 14px; font-weight:bold; width:240px; vertical-align:top; border-bottom:1px solid #e6e9eb;">${etiqueta}</td>
+        <td style="padding:9px 14px; vertical-align:top; border-bottom:1px solid #e6e9eb;">${valor}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `
+    <table style="width:100%; max-width:640px; border-collapse:collapse; font-family:Arial,sans-serif; font-size:13px; color:#1b2327; border:1px solid #e6e9eb;">
+      <tr>
+        <td colspan="2" style="background:#fdeee3; padding:14px 16px; font-size:15px; font-weight:bold; color:#d9660f;">
+          ${titulo}
+        </td>
+      </tr>
+      ${filasHtml}
+    </table>`;
 }
 
 // ------------------------------------------------------------

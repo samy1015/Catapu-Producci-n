@@ -345,10 +345,6 @@
     const encabezado = `
       <div class="tk-ficha-header">
         <span class="tk-ficha-numero">${escaparHtml(numeroFormateado(f.numero))}</span>
-        <a class="tk-ficha-descargar-pdf" target="_blank" rel="noopener"
-           href="${ORDEN_INGRESO_URL}?accion=descargar&id=${encodeURIComponent(f.id)}&clave=${encodeURIComponent(window.claveAppsScript || "")}">
-          Descargar orden
-        </a>
         <div class="tk-ficha-header-fila">
           <span class="tk-ficha-modelo">${escaparHtml(f.modelo || "—")}</span>
           <span>${escaparHtml(TIENDAS_NOMBRE_LARGO[f.tienda] || f.tienda)}</span>
@@ -467,6 +463,7 @@
             <input type="file" class="tk-informe-fotos" accept="image/*" multiple hidden />
           </label>
         </div>
+        <div class="tk-fotos-seleccionadas" hidden></div>
         <div class="tk-form-checks tk-form-checks--col tk-conclusion-grupo">
           ${opcionesConclusion}
           <label class="tk-check tk-check-otro">
@@ -498,12 +495,6 @@
         <p class="tk-ficha-texto">${escaparHtml(valor || "—")}</p>
       </div>`;
     return `
-      <div class="tk-ficha-titulo-fila">
-        <a class="tk-ficha-descargar-link" target="_blank" rel="noopener"
-           href="${ORDEN_INGRESO_URL}?accion=descargar&tipo=informe&id=${encodeURIComponent(f.id)}&clave=${encodeURIComponent(window.claveAppsScript || "")}">
-          Descargar informe
-        </a>
-      </div>
       ${campo("Diagnóstico Técnico", f.informe_diagnostico)}
       ${campo("Observaciones", f.informe_observaciones)}
       ${fotosHtml}
@@ -614,6 +605,7 @@
           <button type="submit" class="btn-refresh">Guardar</button>
           <span class="status-line tk-comentario-status"></span>
         </div>
+        <div class="tk-fotos-seleccionadas" hidden></div>
       </form>
       ${lista}`;
   }
@@ -799,6 +791,7 @@
   function limpiarFormulario() {
     ui.form.reset();
     modeloEditadoManualmente = false;
+    renderizarListaFotosSeleccionadas(ui.fFotos);
   }
 
   // ----------------------------------------------------------
@@ -846,6 +839,55 @@
       urls.push(data.publicUrl);
     }
     return urls;
+  }
+
+  // ----------------------------------------------------------
+  // Lista de fotos elegidas (nombre + peso, con "✕" para quitar una a
+  // una) debajo de cada botón "Agregar fotos". input.files es de solo
+  // lectura, así que para "quitar" una se arma un FileList nuevo con
+  // DataTransfer y se reasigna — el <input> sigue siendo la fuente de
+  // la verdad, subirFotos/crearTicket/guardarInforme/guardarComentario
+  // no necesitan saber que esto existe.
+  // ----------------------------------------------------------
+  function formatearTamanoArchivo(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + "MB";
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + "KB";
+    return bytes + "B";
+  }
+
+  // El contenedor vive siempre como hijo directo del mismo <form> que
+  // el input, con la clase ".tk-fotos-seleccionadas" (uno solo por
+  // formulario) — así no hace falta acoplar esto a la estructura
+  // exacta de cada formulario.
+  function contenedorListaFotos(input) {
+    const formulario = input.closest("form");
+    return formulario && formulario.querySelector(".tk-fotos-seleccionadas");
+  }
+
+  function renderizarListaFotosSeleccionadas(input) {
+    const contenedor = contenedorListaFotos(input);
+    if (!contenedor) return;
+    const archivos = [...input.files];
+    contenedor.hidden = archivos.length === 0;
+    contenedor.innerHTML = archivos
+      .map(
+        (archivo, indice) => `
+      <div class="tk-foto-seleccionada">
+        <span class="tk-foto-seleccionada-nombre">${escaparHtml(archivo.name)}</span>
+        <span class="tk-foto-seleccionada-tamano">${formatearTamanoArchivo(archivo.size)}</span>
+        <button type="button" class="tk-foto-quitar" data-indice="${indice}" aria-label="Quitar ${escaparHtml(archivo.name)}">✕</button>
+      </div>`
+      )
+      .join("");
+  }
+
+  function quitarFotoSeleccionada(input, indice) {
+    const datos = new DataTransfer();
+    [...input.files].forEach((archivo, i) => {
+      if (i !== indice) datos.items.add(archivo);
+    });
+    input.files = datos.files;
+    renderizarListaFotosSeleccionadas(input);
   }
 
   // ----------------------------------------------------------
@@ -1084,6 +1126,10 @@
   uiContenido.addEventListener("change", (evento) => {
     const casilla = evento.target;
 
+    if (casilla.matches("#tk-f-fotos, .tk-informe-fotos, .tk-comentario-fotos")) {
+      return renderizarListaFotosSeleccionadas(casilla);
+    }
+
     const select = casilla.closest(".select-estado-ticket");
     if (select) return cambiarEstado(select);
 
@@ -1147,6 +1193,14 @@
   // <select> de estado, las miniaturas de foto, ni nada dentro de la
   // ficha abierta (formularios, casillas, etc.).
   uiContenido.addEventListener("click", (evento) => {
+    const quitarFoto = evento.target.closest(".tk-foto-quitar");
+    if (quitarFoto) {
+      const formulario = quitarFoto.closest("form");
+      const input = formulario && formulario.querySelector("#tk-f-fotos, .tk-informe-fotos, .tk-comentario-fotos");
+      if (input) quitarFotoSeleccionada(input, Number(quitarFoto.dataset.indice));
+      return;
+    }
+
     const foto = evento.target.closest(".tk-foto-mini");
     if (foto) return abrirLightbox(foto.dataset.url);
 

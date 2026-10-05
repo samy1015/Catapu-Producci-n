@@ -363,6 +363,7 @@ main {
 }
 
 .panel {
+  width: 100%;
   margin: 0 auto 48px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -1282,6 +1283,93 @@ main {
   border: 1px solid var(--line);
 }
 
+/* Lista de archivos elegidos (nombre + peso) debajo de cada botón
+   "Agregar fotos" — la "✕" solo se ve al pasar el cursor por la fila. */
+.tk-fotos-seleccionadas {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* "display: flex" de arriba empata en especificidad con el
+   "display: none" del user-agent para [hidden] — sin este override
+   explícito, el atributo "hidden" no alcanza a ocultar el contenedor. */
+.tk-fotos-seleccionadas[hidden] {
+  display: none;
+}
+
+.tk-foto-seleccionada {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  width: auto;
+}
+
+.tk-foto-seleccionada-nombre {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tk-foto-seleccionada-tamano {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tk-foto-quitar {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.tk-foto-quitar:hover {
+  color: #c0392b;
+  background: rgba(192, 57, 43, 0.12);
+}
+
+/* Formulario de alta: la lista "flota" encima de los campos de abajo
+   (Fecha de hoy, Fecha estimada de entrega, Técnico) en vez de
+   empujarlos — esos campos viven en la misma grilla de 2 columnas
+   (.tk-form-dupla) y no deben moverse de lugar aunque haya muchas
+   fotos elegidas. Scope a ".tk-form-campo-fotos" para no afectar la
+   lista del Informe Técnico ni la de comentarios, que sí pueden
+   empujar contenido (no están en esa grilla). */
+.tk-form-campo-fotos {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.tk-form-campo-fotos .tk-fotos-seleccionadas {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin-top: 4px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
 .tk-form-falla {
   margin-top: 14px;
 }
@@ -1432,41 +1520,6 @@ main {
   color: var(--accent);
   font-weight: 600;
   font-size: 20px;
-}
-
-.tk-ficha-descargar-pdf {
-  position: absolute;
-  top: -10px;
-  right: 14px;
-  background: var(--panel-alt);
-  padding: 0 6px;
-  color: var(--accent);
-  font-size: 11.5px;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.tk-ficha-descargar-pdf:hover {
-  text-decoration: underline;
-}
-
-.tk-ficha-titulo-fila {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
-}
-
-.tk-ficha-descargar-link {
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.tk-ficha-descargar-link:hover {
-  text-decoration: underline;
 }
 
 /* 6 columnas de ancho FIJO (ninguna max-content/auto): cada fila es su

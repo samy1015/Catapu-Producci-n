@@ -441,10 +441,14 @@
                   <label class="tk-check"><input type="checkbox" value="No pudo ser probado" /> No pudo ser probado</label>
                 </div>
               </div>
-              <label class="control">
+              <div class="tk-form-campo-fotos">
                 <span class="control-label">Agregar fotos</span>
-                <input type="file" id="tk-f-fotos" accept="image/*" multiple />
-              </label>
+                <label class="btn-refresh tk-agregar-fotos-btn">
+                  Agregar fotos
+                  <input type="file" id="tk-f-fotos" accept="image/*" multiple hidden />
+                </label>
+                <div class="tk-fotos-seleccionadas" hidden></div>
+              </div>
             </div>
 
             <div class="tk-form-grid tk-form-grid--1">
