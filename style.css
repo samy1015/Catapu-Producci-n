@@ -102,10 +102,20 @@ h1, h2 {
   gap: 32px;
 }
 
+/* Fijo al viewport (no al final del flujo de .sidebar): si el
+   contenido principal es más alto que la pantalla, la página crece y
+   estos botones quedaban al fondo de TODA esa altura, no de lo que se
+   ve — había que hacer scroll para encontrarlos. */
 .sidebar-footer {
-  margin-top: auto; /* empuja este bloque hasta el fondo de la barra lateral */
+  position: fixed;
+  bottom: 24px;
+  left: 0;
+  width: 220px;
+  padding: 0 18px;
+  box-sizing: border-box;
   display: flex;
   justify-content: flex-end;
+  z-index: 10;
 }
 
 .theme-toggle {
