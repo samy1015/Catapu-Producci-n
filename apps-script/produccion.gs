@@ -358,6 +358,7 @@ function registrarEntregas(params) {
           destino: texto(o.destino),
           reparacion: texto(o.reparacion),
           categoria: texto(o.categoria),
+          tecnicoReparacion: texto(o.tecnicoReparacion),
           modelo: texto(o.modelo),
         }))
         .filter(o => o.imei);
@@ -429,7 +430,8 @@ function cerrarEquipos(libro, hojaActual, nombreMesActual, items) {
       return;
     }
     cerrados.push(item.imei);
-    if (item.reparacion) reparaciones.push({ item: item, tecnico: tecnico });
+    // Si no se eligió quién reparó, se asume el técnico que tenía el equipo.
+    if (item.reparacion) reparaciones.push({ item: item, tecnico: item.tecnicoReparacion || tecnico });
   });
 
   if (reparaciones.length) anotarReparaciones(reparaciones);

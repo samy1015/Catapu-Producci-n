@@ -721,6 +721,13 @@ function renderizarTablaEntregas(filas) {
 const ESCANEO_DESTINOS = ["Encaje", "Reparación", "Piezas", "Muerto"];
 const ESCANEO_CATEGORIAS_REPARACION = ["Lote", "Reparación"];
 
+// Misma lista que el selector "Técnico" del modo Abrir (index.html).
+function tecnicosEscaneo() {
+  return Array.from(el.escaneoTecnico.options)
+    .map((opcion) => opcion.value)
+    .filter(Boolean);
+}
+
 function etiquetaMensaje(mensaje) {
   return mensaje.length ? mensaje.slice().sort((a, b) => a - b).join(" - ") : "Mensaje…";
 }
@@ -737,7 +744,7 @@ function opcionesSelect(placeholder, valores, elegido) {
 function renderizarListaEscaneo() {
   el.escaneoLista.hidden = escaneoImeis.length === 0;
   el.escaneoLista.innerHTML = escaneoImeis
-    .map(({ imei, mensaje, destino, reparacion, categoria }, indice) => {
+    .map(({ imei, mensaje, destino, reparacion, categoria, tecnicoReparacion }, indice) => {
       const camposCierre =
         escaneoModo === "cerrar"
           ? `
@@ -762,6 +769,9 @@ function renderizarListaEscaneo() {
                placeholder="Reparación" value="${escaparHtml(reparacion)}" aria-label="Reparación de ${escaparHtml(imei)}" />
         <select class="tk-escaneo-campo" data-indice="${indice}" data-campo="categoria" aria-label="Categoría de ${escaparHtml(imei)}">
           ${opcionesSelect("Categoría…", ESCANEO_CATEGORIAS_REPARACION, categoria)}
+        </select>
+        <select class="tk-escaneo-campo" data-indice="${indice}" data-campo="tecnicoReparacion" aria-label="Técnico que reparó ${escaparHtml(imei)}">
+          ${opcionesSelect("Técnico…", tecnicosEscaneo(), tecnicoReparacion)}
         </select>`
           : "";
       return `
@@ -796,7 +806,7 @@ function agregarImeiEscaneo(valorCrudo) {
     el.escaneoStatus.classList.add("is-error");
     return;
   }
-  escaneoImeis.push({ imei, mensaje: [], destino: "", reparacion: "", categoria: "" });
+  escaneoImeis.push({ imei, mensaje: [], destino: "", reparacion: "", categoria: "", tecnicoReparacion: "" });
   el.escaneoStatus.textContent = "";
   el.escaneoStatus.classList.remove("is-error");
   renderizarListaEscaneo();
@@ -848,6 +858,7 @@ async function aceptarEscaneo() {
       destino: item.destino,
       reparacion: item.reparacion.trim(),
       categoria: item.categoria,
+      tecnicoReparacion: item.tecnicoReparacion.toUpperCase(),
       modelo: (mapaImeiTaller.get(item.imei) || {}).modelo || "",
     }));
     parametros.set("imeis", JSON.stringify(items));
