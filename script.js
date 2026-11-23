@@ -806,10 +806,44 @@ function agregarImeiEscaneo(valorCrudo) {
     el.escaneoStatus.classList.add("is-error");
     return;
   }
-  escaneoImeis.push({ imei, mensaje: [], destino: "", reparacion: "", categoria: "", tecnicoReparacion: "" });
+  escaneoImeis.push(nuevoItemEscaneo(imei));
   el.escaneoStatus.textContent = "";
   el.escaneoStatus.classList.remove("is-error");
   renderizarListaEscaneo();
+}
+
+function nuevoItemEscaneo(imei) {
+  return { imei, mensaje: [], destino: "", reparacion: "", categoria: "", tecnicoReparacion: "" };
+}
+
+// Lista pegada (una por línea, o separada por espacios/comas/punto y coma).
+function agregarListaImeiEscaneo(texto) {
+  const candidatos = String(texto || "")
+    .split(/[\s,;]+/)
+    .map((s) => s.replace(/\D/g, ""))
+    .filter(Boolean);
+
+  let agregados = 0;
+  const repetidos = [];
+  const invalidos = [];
+  candidatos.forEach((imei) => {
+    if (imei.length < MIN_DIGITOS_IMEI_ESCANEO) {
+      invalidos.push(imei);
+    } else if (escaneoImeis.some((item) => item.imei === imei)) {
+      repetidos.push(imei);
+    } else {
+      escaneoImeis.push(nuevoItemEscaneo(imei));
+      agregados++;
+    }
+  });
+  renderizarListaEscaneo();
+
+  const avisos = [];
+  if (repetidos.length) avisos.push(`ya estaban en la lista: ${repetidos.join(", ")}`);
+  if (invalidos.length) avisos.push(`muy cortos (ignorados): ${invalidos.join(", ")}`);
+  el.escaneoStatus.textContent =
+    `${agregados} IMEI agregado(s).` + (avisos.length ? ` Ojo, ${avisos.join("; ")}.` : "");
+  el.escaneoStatus.classList.toggle("is-error", avisos.length > 0);
 }
 
 function quitarImeiEscaneo(indice) {
@@ -1227,6 +1261,16 @@ el.escaneoImeiInput.addEventListener("keydown", (evento) => {
   agregarImeiEscaneo(el.escaneoImeiInput.value);
   el.escaneoImeiInput.value = "";
   el.escaneoImeiInput.focus(); // para seguir escaneando sin tocar el mouse
+});
+// Pegar varios IMEI de una vez: el input es de una sola línea y el
+// navegador juntaría los saltos de línea, así que se procesa el texto
+// pegado directamente.
+el.escaneoImeiInput.addEventListener("paste", (evento) => {
+  const texto = (evento.clipboardData || window.clipboardData).getData("text");
+  if (!/[\s,;]/.test(texto.trim())) return; // un solo IMEI: pegado normal, luego Enter
+  evento.preventDefault();
+  agregarListaImeiEscaneo(texto);
+  el.escaneoImeiInput.value = "";
 });
 el.escaneoLista.addEventListener("click", (evento) => {
   const quitar = evento.target.closest(".tk-foto-quitar");
