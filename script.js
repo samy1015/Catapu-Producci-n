@@ -28,6 +28,16 @@ let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de
 // "abierto" (por defecto, al entrar): solo ABIERTO, ignorando el rango
 // de fechas. "mostrar": todo (abierto + cerrado), respetando el rango.
 let modoEntregas = "abierto";
+// Escaneo de IMEI ("Registrar equipos"): se acumulan acá hasta que se
+// confirma con "Aceptar" (ver aceptarEscaneo). Cada ítem es
+// { imei, mensaje } — "mensaje" (1 al 5, multiselección) solo se usa en
+// modo "cerrar", uno distinto por cada IMEI.
+let escaneoImeis = [];
+let escaneoModo = "abrir";
+// Índice del ítem cuyo desplegable de "Mensaje" está abierto (solo uno
+// a la vez), o null si ninguno.
+let escaneoMensajeAbierto = null;
+const MIN_DIGITOS_IMEI_ESCANEO = 6;
 let cargando = false;
 let esPrimeraCarga = true; // solo queremos fijar "último día" al abrir la página, no cada Actualizar
 
@@ -65,6 +75,17 @@ const el = {
   entregasTotalAbiertos: document.getElementById("entregas-total-abiertos"),
   entregasTotalCerrados: document.getElementById("entregas-total-cerrados"),
   entregasTotalGeneral: document.getElementById("entregas-total-general"),
+
+  escaneoModoAbrir: document.getElementById("escaneo-modo-abrir"),
+  escaneoModoCerrar: document.getElementById("escaneo-modo-cerrar"),
+  escaneoCamposAbrir: document.getElementById("escaneo-campos-abrir"),
+  escaneoTecnico: document.getElementById("escaneo-tecnico"),
+  escaneoCategoria: document.getElementById("escaneo-categoria"),
+  escaneoImeiInput: document.getElementById("escaneo-imei-input"),
+  escaneoLista: document.getElementById("escaneo-lista"),
+  escaneoBtnAceptar: document.getElementById("escaneo-btn-aceptar"),
+  escaneoBtnLimpiar: document.getElementById("escaneo-btn-limpiar"),
+  escaneoStatus: document.getElementById("escaneo-status"),
 
   ultimaActualizacion: document.getElementById("ultima-actualizacion"),
 
@@ -695,6 +716,146 @@ function renderizarTablaEntregas(filas) {
 }
 
 // ============================================================
+// 6b. ESCANEO DE IMEI ("Registrar equipos") — abrir/cerrar equipos en
+// "Equipos por tecnico" directo desde el dashboard. Reutiliza el
+// mismo look de ".tk-fotos-seleccionadas" (lista con "✕" para quitar)
+// que ya usa Tickets para fotos elegidas.
+// ============================================================
+function renderizarListaEscaneo() {
+  el.escaneoLista.hidden = escaneoImeis.length === 0;
+  el.escaneoLista.innerHTML = escaneoImeis
+    .map(({ imei, mensaje }, indice) => {
+      const abierto = escaneoMensajeAbierto === indice;
+      const etiquetaBoton = mensaje.length
+        ? mensaje.slice().sort((a, b) => a - b).join(" - ")
+        : "Mensaje…";
+      const dropdownMensaje =
+        escaneoModo === "cerrar"
+          ? `
+        <div class="tk-mensaje-dropdown">
+          <button type="button" class="tk-mensaje-dropdown-boton" data-indice="${indice}"
+                  aria-haspopup="true" aria-expanded="${abierto}">${escaparHtml(etiquetaBoton)}</button>
+          <div class="tk-mensaje-dropdown-panel" role="group" aria-label="Mensaje de ${escaparHtml(imei)}" ${abierto ? "" : "hidden"}>
+            ${[1, 2, 3, 4, 5]
+              .map(
+                (n) => `
+              <label class="tk-mensaje-dropdown-opcion">
+                <input type="checkbox" data-indice="${indice}" data-valor="${n}" ${mensaje.includes(n) ? "checked" : ""} />${n}
+              </label>`
+              )
+              .join("")}
+          </div>
+        </div>`
+          : "";
+      return `
+      <div class="tk-foto-seleccionada">
+        <span class="tk-foto-seleccionada-nombre">${escaparHtml(imei)}</span>
+        ${dropdownMensaje}
+        <button type="button" class="tk-foto-quitar" data-indice="${indice}" aria-label="Quitar ${escaparHtml(imei)}">✕</button>
+      </div>`;
+    })
+    .join("");
+}
+
+function agregarImeiEscaneo(valorCrudo) {
+  const imei = String(valorCrudo || "").replace(/\D/g, "");
+  if (imei.length < MIN_DIGITOS_IMEI_ESCANEO) {
+    el.escaneoStatus.textContent = `Escribe/escanea un IMEI de al menos ${MIN_DIGITOS_IMEI_ESCANEO} dígitos.`;
+    el.escaneoStatus.classList.add("is-error");
+    return;
+  }
+  if (escaneoImeis.some((item) => item.imei === imei)) {
+    el.escaneoStatus.textContent = `El IMEI ${imei} ya está en la lista.`;
+    el.escaneoStatus.classList.add("is-error");
+    return;
+  }
+  escaneoImeis.push({ imei, mensaje: [] });
+  el.escaneoStatus.textContent = "";
+  el.escaneoStatus.classList.remove("is-error");
+  renderizarListaEscaneo();
+}
+
+function quitarImeiEscaneo(indice) {
+  escaneoImeis.splice(indice, 1);
+  escaneoMensajeAbierto = null; // el índice abierto ya no es válido tras el splice
+  renderizarListaEscaneo();
+}
+
+function actualizarModoEscaneo() {
+  escaneoModo = el.escaneoModoCerrar.checked ? "cerrar" : "abrir";
+  el.escaneoCamposAbrir.hidden = escaneoModo === "cerrar";
+  escaneoMensajeAbierto = null;
+  renderizarListaEscaneo(); // muestra/oculta el selector de mensaje por IMEI
+}
+
+async function aceptarEscaneo() {
+  if (escaneoImeis.length === 0) {
+    el.escaneoStatus.textContent = "Escanea al menos un IMEI antes de aceptar.";
+    el.escaneoStatus.classList.add("is-error");
+    return;
+  }
+
+  const parametros = new URLSearchParams();
+  parametros.set("accion", "registrarEntregas");
+  parametros.set("modo", escaneoModo);
+
+  if (escaneoModo === "abrir") {
+    const tecnico = el.escaneoTecnico.value;
+    const categoria = el.escaneoCategoria.value;
+    if (!tecnico || !categoria) {
+      el.escaneoStatus.textContent = "Elige técnico y categoría antes de aceptar.";
+      el.escaneoStatus.classList.add("is-error");
+      return;
+    }
+    parametros.set("tecnico", tecnico.toUpperCase());
+    parametros.set("categoria", categoria);
+    parametros.set("imeis", JSON.stringify(escaneoImeis.map((item) => item.imei)));
+  } else {
+    const sinMensaje = escaneoImeis.filter((item) => item.mensaje.length === 0);
+    if (sinMensaje.length) {
+      el.escaneoStatus.textContent = `Elige el/los mensaje(s) (1 al 5) de: ${sinMensaje.map((item) => item.imei).join(", ")}.`;
+      el.escaneoStatus.classList.add("is-error");
+      return;
+    }
+    const items = escaneoImeis.map((item) => ({
+      imei: item.imei,
+      mensaje: item.mensaje.slice().sort((a, b) => a - b).join(" - "),
+    }));
+    parametros.set("imeis", JSON.stringify(items));
+  }
+
+  el.escaneoBtnAceptar.disabled = true;
+  el.escaneoStatus.classList.remove("is-error");
+  el.escaneoStatus.textContent = "Guardando…";
+
+  try {
+    const datos = await cargarViaJSONP(`${APPS_SCRIPT_URL}?${parametros.toString()}`);
+    if (datos && datos.error) throw new Error(datos.error);
+
+    if (escaneoModo === "abrir") {
+      el.escaneoStatus.textContent = `${datos.agregados} equipo(s) agregado(s).`;
+    } else {
+      const aviso = datos.noEncontrados.length
+        ? ` No se encontró abierto: ${datos.noEncontrados.join(", ")}.`
+        : "";
+      el.escaneoStatus.textContent = `${datos.cerrados.length} cerrado(s).${aviso}`;
+      if (datos.noEncontrados.length) el.escaneoStatus.classList.add("is-error");
+    }
+
+    escaneoImeis = [];
+    escaneoMensajeAbierto = null;
+    renderizarListaEscaneo();
+    cargarEntregas(); // refresca "Equipos por técnico" con el cambio recién hecho
+  } catch (error) {
+    console.error(error);
+    el.escaneoStatus.textContent = "No se pudo guardar. (" + error.message + ")";
+    el.escaneoStatus.classList.add("is-error");
+  } finally {
+    el.escaneoBtnAceptar.disabled = false;
+  }
+}
+
+// ============================================================
 // 7. BÚSQUEDA POR IMEI (independiente de fecha y lote)
 // ============================================================
 // Busca en TODA la información sin importar los filtros de fecha o
@@ -1017,6 +1178,58 @@ el.entregasBtnAbierto.addEventListener("click", () => {
   renderizarEntregasFiltradas();
 });
 actualizarBotonesModoEntregas(); // estado visual inicial ("Abierto" activo)
+
+el.escaneoModoAbrir.addEventListener("change", actualizarModoEscaneo);
+el.escaneoModoCerrar.addEventListener("change", actualizarModoEscaneo);
+el.escaneoImeiInput.addEventListener("keydown", (evento) => {
+  if (evento.key !== "Enter") return;
+  evento.preventDefault();
+  agregarImeiEscaneo(el.escaneoImeiInput.value);
+  el.escaneoImeiInput.value = "";
+  el.escaneoImeiInput.focus(); // para seguir escaneando sin tocar el mouse
+});
+el.escaneoLista.addEventListener("click", (evento) => {
+  const quitar = evento.target.closest(".tk-foto-quitar");
+  if (quitar) {
+    quitarImeiEscaneo(Number(quitar.dataset.indice));
+    return;
+  }
+  const boton = evento.target.closest(".tk-mensaje-dropdown-boton");
+  if (boton) {
+    const indice = Number(boton.dataset.indice);
+    escaneoMensajeAbierto = escaneoMensajeAbierto === indice ? null : indice;
+    renderizarListaEscaneo();
+  }
+});
+el.escaneoLista.addEventListener("change", (evento) => {
+  const casilla = evento.target.closest(".tk-mensaje-dropdown-panel input[type=checkbox]");
+  if (!casilla) return;
+  const indice = Number(casilla.dataset.indice);
+  const valor = Number(casilla.dataset.valor);
+  const item = escaneoImeis[indice];
+  if (!item) return;
+  if (casilla.checked) {
+    if (!item.mensaje.includes(valor)) item.mensaje.push(valor);
+  } else {
+    item.mensaje = item.mensaje.filter((n) => n !== valor);
+  }
+  renderizarListaEscaneo(); // refresca la etiqueta del botón ("1 - 3 - 5")
+});
+// Cierra el desplegable de "Mensaje" al hacer clic fuera de él.
+document.addEventListener("click", (evento) => {
+  if (escaneoMensajeAbierto === null) return;
+  if (evento.target.closest(".tk-mensaje-dropdown")) return;
+  escaneoMensajeAbierto = null;
+  renderizarListaEscaneo();
+});
+el.escaneoBtnLimpiar.addEventListener("click", () => {
+  escaneoImeis = [];
+  escaneoMensajeAbierto = null;
+  el.escaneoStatus.textContent = "";
+  el.escaneoStatus.classList.remove("is-error");
+  renderizarListaEscaneo();
+});
+el.escaneoBtnAceptar.addEventListener("click", aceptarEscaneo);
 el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
 el.buscadorImei.addEventListener("input", programarBusquedaImei);
 if (el.btnTema) {

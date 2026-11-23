@@ -172,6 +172,66 @@
           </div>
         </section>
 
+        <section class="panel panel-wide" id="panel-escaneo">
+          <h2 class="panel-title">Registrar equipos (escaneo)</h2>
+
+          <div class="controls">
+            <label class="tk-check"><input type="radio" name="escaneo-modo" id="escaneo-modo-abrir" checked /> Abrir (nuevo ingreso)</label>
+            <label class="tk-check"><input type="radio" name="escaneo-modo" id="escaneo-modo-cerrar" /> Cerrar (entrega)</label>
+          </div>
+
+          <div class="controls" id="escaneo-campos-abrir">
+            <label class="control">
+              <span class="control-label">Técnico</span>
+              <select id="escaneo-tecnico">
+                <option value="">Elige un técnico…</option>
+                <option value="JACK G.">JACK G.</option>
+                <option value="DIEGO F.">DIEGO F.</option>
+                <option value="ABDIEL C.">ABDIEL C.</option>
+                <option value="DANIEL C.">DANIEL C.</option>
+                <option value="CRISTONY A.">CRISTONY A.</option>
+                <option value="FREDDY S.">FREDDY S.</option>
+                <option value="ALEXANDER B.">ALEXANDER B.</option>
+                <option value="Hermes R.">Hermes R.</option>
+                <option value="Ezequiel S.">Ezequiel S.</option>
+                <option value="Samy B.">Samy B.</option>
+                <option value="Mario L.">Mario L.</option>
+                <option value="Jesus P.">Jesus P.</option>
+                <option value="Tomas C.">Tomas C.</option>
+                <option value="Jhon R.">Jhon R.</option>
+                <option value="Bruce M.">Bruce M.</option>
+                <option value="Victor A.">Victor A.</option>
+                <option value="Pierre B.">Pierre B.</option>
+                <option value="Juanpablo A.">Juanpablo A.</option>
+                <option value="Cristian G.">Cristian G.</option>
+              </select>
+            </label>
+            <label class="control">
+              <span class="control-label">Categoría</span>
+              <select id="escaneo-categoria">
+                <option value="">Elige una categoría…</option>
+                <option value="Lote">Lote</option>
+                <option value="Reparación">Reparación</option>
+                <option value="Garantia">Garantia</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="control">
+            <span class="control-label">Escanear IMEI</span>
+            <input type="text" id="escaneo-imei-input" inputmode="numeric" autocomplete="off"
+                   placeholder="Escanea o escribe un IMEI y presiona Enter" />
+          </label>
+
+          <div class="tk-fotos-seleccionadas" id="escaneo-lista" hidden></div>
+
+          <div class="controls">
+            <button type="button" class="btn-refresh" id="escaneo-btn-aceptar">Aceptar</button>
+            <button type="button" class="btn-refresh" id="escaneo-btn-limpiar">Limpiar</button>
+            <span class="status-line" id="escaneo-status"></span>
+          </div>
+        </section>
+
         <section class="panel panel-wide">
           <div class="panel-title-fila">
             <h2 class="panel-title">Equipos por técnico</h2>

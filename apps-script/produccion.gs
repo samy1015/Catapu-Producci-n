@@ -68,6 +68,8 @@ function doGet(e) {
       json = JSON.stringify(buscarPorImei(params.imei));
     } else if (params.entregas) {
       json = obtenerEntregasJson();
+    } else if (params.accion === "registrarEntregas") {
+      json = JSON.stringify(registrarEntregas(params));
     } else {
       json = obtenerResumenJson(params.fresco === "1");
     }
@@ -321,4 +323,133 @@ function encontrarCabeceraEntregas(datos) {
     }
   }
   throw new Error('No se encontró la fila de encabezados ("FECHA"/"TECNICO") en la pestaña de entregas.');
+}
+
+// ------------------------------------------------------------
+// Escaneo de IMEI desde el dashboard: abrir (nuevo ingreso) o cerrar
+// (entrega) equipos en "Equipos por tecnico". Escribe en la MISMA
+// hoja/pestaña que ya lee obtenerEntregasJson.
+// ------------------------------------------------------------
+function registrarEntregas(params) {
+  const libro = SpreadsheetApp.openById(ENTREGAS_SPREADSHEET_ID);
+  const nombreMes = MESES_ES[new Date().getMonth()];
+  const hoja = libro.getSheetByName(nombreMes);
+  if (!hoja) throw new Error('No existe la pestaña "' + nombreMes + '" en "Equipos por tecnico".');
+
+  if (params.modo === "abrir") {
+    let imeis;
+    try {
+      imeis = JSON.parse(params.imeis || "[]").map(s => String(s).trim()).filter(Boolean);
+    } catch (err) {
+      throw new Error("Lista de IMEI inválida.");
+    }
+    if (!imeis.length) throw new Error("No hay ningún IMEI para procesar.");
+    return abrirEquipos(hoja, imeis, params.tecnico, params.categoria);
+  }
+
+  if (params.modo === "cerrar") {
+    let items;
+    try {
+      items = JSON.parse(params.imeis || "[]")
+        .map(o => ({ imei: String(o.imei || "").trim(), mensaje: String(o.mensaje || "").trim() }))
+        .filter(o => o.imei);
+    } catch (err) {
+      throw new Error("Lista de IMEI inválida.");
+    }
+    if (!items.length) throw new Error("No hay ningún IMEI para procesar.");
+    return cerrarEquipos(libro, hoja, nombreMes, items);
+  }
+
+  throw new Error('Modo desconocido: "' + params.modo + '".');
+}
+
+// Agrega una fila nueva por cada IMEI: FECHA/HORA = ahora, ESTADO =
+// ABIERTO. La columna "#" (y cualquier otra que no conozcamos) queda
+// vacía a propósito.
+function abrirEquipos(hoja, imeis, tecnico, categoria) {
+  if (!tecnico) throw new Error("Falta elegir el técnico.");
+  if (!categoria) throw new Error("Falta elegir la categoría.");
+
+  const datos = hoja.getDataRange().getValues();
+  const { cabecera } = encontrarCabeceraEntregas(datos);
+  const col = nombre => {
+    const i = cabecera.indexOf(nombre);
+    if (i === -1) throw new Error('Falta la columna "' + nombre + '" en la hoja.');
+    return i;
+  };
+  const colFecha = col("FECHA");
+  const colHora = col("HORA");
+  const colImei = col("IMEI");
+  const colTecnico = col("TECNICO");
+  const colCategoria = col("CATEGORIA");
+  const colEstado = col("ESTADO");
+
+  const ahora = new Date();
+  const totalColumnas = hoja.getLastColumn();
+  const filasNuevas = imeis.map(imei => {
+    const fila = new Array(totalColumnas).fill("");
+    fila[colFecha] = ahora;
+    fila[colHora] = ahora; // misma fecha/hora en las 2 celdas: cada una se
+                            // formatea distinto al leer (yyyy-MM-dd / HH:mm)
+    fila[colImei] = imei;
+    fila[colTecnico] = tecnico;
+    fila[colCategoria] = categoria;
+    fila[colEstado] = "ABIERTO";
+    return fila;
+  });
+  hoja.getRange(hoja.getLastRow() + 1, 1, filasNuevas.length, totalColumnas).setValues(filasNuevas);
+  return { ok: true, agregados: imeis.length };
+}
+
+// Por cada ítem {imei, mensaje}, busca primero en la pestaña del mes
+// actual y, si no aparece, en la del mes anterior (por si se abrió a
+// fin de mes y se cierra a inicios del siguiente).
+function cerrarEquipos(libro, hojaActual, nombreMesActual, items) {
+  const indiceMes = MESES_ES.indexOf(nombreMesActual);
+  const hojaAnterior = libro.getSheetByName(MESES_ES[(indiceMes + 11) % 12]);
+
+  const cerrados = [];
+  const noEncontrados = [];
+  items.forEach(item => {
+    const cerrado =
+      cerrarEnHoja(hojaActual, item.imei, item.mensaje) ||
+      (hojaAnterior && cerrarEnHoja(hojaAnterior, item.imei, item.mensaje));
+    if (cerrado) {
+      cerrados.push(item.imei);
+    } else {
+      noEncontrados.push(item.imei);
+    }
+  });
+  return { ok: true, cerrados: cerrados, noEncontrados: noEncontrados };
+}
+
+// Busca de abajo hacia arriba (la más reciente primero) la última fila
+// ABIERTO con ese IMEI y la marca CERRADO con fecha/hora de hoy y el
+// mensaje (1 al 5) elegido para ese equipo.
+// true si encontró y cerró algo; false si no había ninguna abierta.
+function cerrarEnHoja(hoja, imei, mensaje) {
+  const datos = hoja.getDataRange().getValues();
+  const { indiceFila, cabecera } = encontrarCabeceraEntregas(datos);
+  const colImei = cabecera.indexOf("IMEI");
+  const colEstado = cabecera.indexOf("ESTADO");
+  const colFechaC = cabecera.indexOf("FECHA C.");
+  const colHoraC = cabecera.indexOf("HORA C.");
+  const colMensaje = cabecera.indexOf("MENSAJE");
+
+  for (let r = datos.length - 1; r > indiceFila; r--) {
+    const imeiFila = String(datos[r][colImei] || "").trim();
+    const estadoFila = String(datos[r][colEstado] || "").trim().toUpperCase();
+    if (imeiFila === imei && estadoFila === "ABIERTO") {
+      const ahora = new Date();
+      const filaReal = r + 1; // getDataRange es 0-index; las filas de Sheets son 1-index
+      hoja.getRange(filaReal, colEstado + 1).setValue("CERRADO");
+      hoja.getRange(filaReal, colFechaC + 1).setValue(ahora);
+      hoja.getRange(filaReal, colHoraC + 1).setValue(ahora);
+      if (colMensaje !== -1 && mensaje) {
+        hoja.getRange(filaReal, colMensaje + 1).setValue(mensaje); // ej: "1 - 3 - 5"
+      }
+      return true;
+    }
+  }
+  return false;
 }

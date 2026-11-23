@@ -1374,6 +1374,69 @@ main {
   white-space: nowrap;
 }
 
+/* ".panel" trae "overflow-x: auto", y fijar un overflow fuerza al otro
+   eje a dejar de ser "visible" (mismo quirk que #tk-detalle-contenedor
+   más abajo) — sin este override, el panel recorta el desplegable de
+   "Mensaje" apenas se abre cerca del borde inferior. */
+#panel-escaneo {
+  overflow-x: visible;
+}
+
+/* Mismo quirk de "[hidden]" empatando en especificidad con un
+   "display" fijo (acá "display: flex" de .controls) — sin este
+   override, ocultar técnico/categoría en modo "Cerrar" no surtía
+   efecto. */
+#escaneo-campos-abrir[hidden] {
+  display: none;
+}
+
+.tk-mensaje-dropdown {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.tk-mensaje-dropdown-boton {
+  border: 1px solid var(--line);
+  background: var(--panel-alt);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tk-mensaje-dropdown-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.tk-mensaje-dropdown-panel[hidden] {
+  display: none;
+}
+
+.tk-mensaje-dropdown-opcion {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .tk-foto-quitar {
   border: none;
   background: transparent;
