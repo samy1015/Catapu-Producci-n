@@ -350,8 +350,16 @@ function registrarEntregas(params) {
   if (params.modo === "cerrar") {
     let items;
     try {
+      const texto = v => String(v || "").trim();
       items = JSON.parse(params.imeis || "[]")
-        .map(o => ({ imei: String(o.imei || "").trim(), mensaje: String(o.mensaje || "").trim() }))
+        .map(o => ({
+          imei: texto(o.imei),
+          mensaje: texto(o.mensaje),
+          destino: texto(o.destino),
+          reparacion: texto(o.reparacion),
+          categoria: texto(o.categoria),
+          modelo: texto(o.modelo),
+        }))
         .filter(o => o.imei);
     } catch (err) {
       throw new Error("Lista de IMEI inválida.");
@@ -397,7 +405,9 @@ function abrirEquipos(hoja, imeis, tecnico, categoria) {
     fila[colEstado] = "ABIERTO";
     return fila;
   });
-  hoja.getRange(hoja.getLastRow() + 1, 1, filasNuevas.length, totalColumnas).setValues(filasNuevas);
+  const inicio = hoja.getLastRow() + 1;
+  asegurarFilas(hoja, inicio, filasNuevas.length);
+  hoja.getRange(inicio, 1, filasNuevas.length, totalColumnas).setValues(filasNuevas);
   return { ok: true, agregados: imeis.length };
 }
 
@@ -410,24 +420,28 @@ function cerrarEquipos(libro, hojaActual, nombreMesActual, items) {
 
   const cerrados = [];
   const noEncontrados = [];
+  const reparaciones = [];
   items.forEach(item => {
-    const cerrado =
-      cerrarEnHoja(hojaActual, item.imei, item.mensaje) ||
-      (hojaAnterior && cerrarEnHoja(hojaAnterior, item.imei, item.mensaje));
-    if (cerrado) {
-      cerrados.push(item.imei);
-    } else {
+    let tecnico = cerrarEnHoja(hojaActual, item);
+    if (tecnico === null && hojaAnterior) tecnico = cerrarEnHoja(hojaAnterior, item);
+    if (tecnico === null) {
       noEncontrados.push(item.imei);
+      return;
     }
+    cerrados.push(item.imei);
+    if (item.reparacion) reparaciones.push({ item: item, tecnico: tecnico });
   });
-  return { ok: true, cerrados: cerrados, noEncontrados: noEncontrados };
+
+  if (reparaciones.length) anotarReparaciones(reparaciones);
+  return { ok: true, cerrados: cerrados, noEncontrados: noEncontrados, reparados: reparaciones.length };
 }
 
 // Busca de abajo hacia arriba (la más reciente primero) la última fila
-// ABIERTO con ese IMEI y la marca CERRADO con fecha/hora de hoy y el
-// mensaje (1 al 5) elegido para ese equipo.
-// true si encontró y cerró algo; false si no había ninguna abierta.
-function cerrarEnHoja(hoja, imei, mensaje) {
+// ABIERTO con ese IMEI y la marca CERRADO con fecha/hora de hoy, más
+// mensaje ("1 - 3 - 5") y destino si se eligieron.
+// Devuelve el técnico de esa fila (para "EQUIPOS REPARADOS"), o null si
+// no había ninguna abierta.
+function cerrarEnHoja(hoja, item) {
   const datos = hoja.getDataRange().getValues();
   const { indiceFila, cabecera } = encontrarCabeceraEntregas(datos);
   const colImei = cabecera.indexOf("IMEI");
@@ -435,21 +449,77 @@ function cerrarEnHoja(hoja, imei, mensaje) {
   const colFechaC = cabecera.indexOf("FECHA C.");
   const colHoraC = cabecera.indexOf("HORA C.");
   const colMensaje = cabecera.indexOf("MENSAJE");
+  const colDestino = cabecera.indexOf("DESTINO");
+  const colTecnico = cabecera.indexOf("TECNICO");
 
   for (let r = datos.length - 1; r > indiceFila; r--) {
     const imeiFila = String(datos[r][colImei] || "").trim();
     const estadoFila = String(datos[r][colEstado] || "").trim().toUpperCase();
-    if (imeiFila === imei && estadoFila === "ABIERTO") {
+    if (imeiFila === item.imei && estadoFila === "ABIERTO") {
       const ahora = new Date();
       const filaReal = r + 1; // getDataRange es 0-index; las filas de Sheets son 1-index
       hoja.getRange(filaReal, colEstado + 1).setValue("CERRADO");
       hoja.getRange(filaReal, colFechaC + 1).setValue(ahora);
       hoja.getRange(filaReal, colHoraC + 1).setValue(ahora);
-      if (colMensaje !== -1 && mensaje) {
-        hoja.getRange(filaReal, colMensaje + 1).setValue(mensaje); // ej: "1 - 3 - 5"
-      }
-      return true;
+      if (colMensaje !== -1 && item.mensaje) hoja.getRange(filaReal, colMensaje + 1).setValue(item.mensaje);
+      if (colDestino !== -1 && item.destino) hoja.getRange(filaReal, colDestino + 1).setValue(item.destino);
+      return colTecnico !== -1 ? String(datos[r][colTecnico] || "").trim() : "";
     }
   }
-  return false;
+  return null;
+}
+
+// ------------------------------------------------------------
+// "EQUIPOS REPARADOS" (otra spreadsheet, pestaña REPARADOS): una fila
+// por cada equipo cerrado al que se le anotó una reparación.
+// ------------------------------------------------------------
+const REPARADOS_SPREADSHEET_ID = "10bs8xnHtiaLsTQAxwxKzrO69LO3nvIny7IvM9NVv_4Y";
+const REPARADOS_HOJA = "REPARADOS";
+
+// "FECHA DE REPARACIÓN" con o sin tilde, mayúsculas o no, da igual.
+function normalizarCabecera(texto) {
+  return String(texto).normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toUpperCase();
+}
+
+function anotarReparaciones(reparaciones) {
+  const hoja = SpreadsheetApp.openById(REPARADOS_SPREADSHEET_ID).getSheetByName(REPARADOS_HOJA);
+  if (!hoja) throw new Error('No existe la pestaña "' + REPARADOS_HOJA + '" en "EQUIPOS REPARADOS".');
+
+  const totalColumnas = hoja.getLastColumn();
+  const cabecera = hoja.getRange(1, 1, 1, totalColumnas).getValues()[0].map(normalizarCabecera);
+  const col = nombre => {
+    const i = cabecera.indexOf(nombre);
+    if (i === -1) throw new Error('Falta la columna "' + nombre + '" en "EQUIPOS REPARADOS".');
+    return i;
+  };
+  const colFecha = col("FECHA DE REPARACION");
+  const colModelo = col("MODELO");
+  const colImei = col("IMEI");
+  const colFalla = col("FALLA");
+  const colCategoria = col("CATEGORIA");
+  const colTecnico = col("TECNICO");
+
+  const hoy = new Date();
+  const filas = reparaciones.map(({ item, tecnico }) => {
+    const fila = new Array(totalColumnas).fill("");
+    fila[colFecha] = hoy;
+    fila[colModelo] = item.modelo.toUpperCase();
+    fila[colImei] = item.imei;
+    fila[colFalla] = item.reparacion.toUpperCase();
+    fila[colCategoria] = item.categoria.toUpperCase();
+    fila[colTecnico] = tecnico.toUpperCase();
+    return fila;
+  });
+
+  const inicio = hoja.getLastRow() + 1;
+  asegurarFilas(hoja, inicio, filas.length);
+  hoja.getRange(inicio, 1, filas.length, totalColumnas).setValues(filas);
+  hoja.getRange(inicio, colFecha + 1, filas.length, 1).setNumberFormat("dd/MM/yyyy");
+}
+
+// getRange() falla si se sale del tamaño de la hoja; si ya no quedan
+// filas vacías al final, se agregan las que falten.
+function asegurarFilas(hoja, filaInicio, cantidad) {
+  const faltan = filaInicio + cantidad - 1 - hoja.getMaxRows();
+  if (faltan > 0) hoja.insertRowsAfter(hoja.getMaxRows(), faltan);
 }

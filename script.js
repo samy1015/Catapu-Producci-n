@@ -30,13 +30,10 @@ let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de
 let modoEntregas = "abierto";
 // Escaneo de IMEI ("Registrar equipos"): se acumulan acá hasta que se
 // confirma con "Aceptar" (ver aceptarEscaneo). Cada ítem es
-// { imei, mensaje } — "mensaje" (1 al 5, multiselección) solo se usa en
-// modo "cerrar", uno distinto por cada IMEI.
+// { imei, mensaje, destino, reparacion, categoria } — todo menos "imei"
+// solo se usa en modo "cerrar", con valores propios por cada IMEI.
 let escaneoImeis = [];
 let escaneoModo = "abrir";
-// Índice del ítem cuyo desplegable de "Mensaje" está abierto (solo uno
-// a la vez), o null si ninguno.
-let escaneoMensajeAbierto = null;
 const MIN_DIGITOS_IMEI_ESCANEO = 6;
 let cargando = false;
 let esPrimeraCarga = true; // solo queremos fijar "último día" al abrir la página, no cada Actualizar
@@ -721,21 +718,33 @@ function renderizarTablaEntregas(filas) {
 // mismo look de ".tk-fotos-seleccionadas" (lista con "✕" para quitar)
 // que ya usa Tickets para fotos elegidas.
 // ============================================================
+const ESCANEO_DESTINOS = ["Encaje", "Reparación", "Piezas", "Muerto"];
+const ESCANEO_CATEGORIAS_REPARACION = ["Lote", "Reparación"];
+
+function etiquetaMensaje(mensaje) {
+  return mensaje.length ? mensaje.slice().sort((a, b) => a - b).join(" - ") : "Mensaje…";
+}
+
+function opcionesSelect(placeholder, valores, elegido) {
+  return (
+    `<option value="">${placeholder}</option>` +
+    valores
+      .map((v) => `<option value="${escaparHtml(v)}" ${v === elegido ? "selected" : ""}>${escaparHtml(v)}</option>`)
+      .join("")
+  );
+}
+
 function renderizarListaEscaneo() {
   el.escaneoLista.hidden = escaneoImeis.length === 0;
   el.escaneoLista.innerHTML = escaneoImeis
-    .map(({ imei, mensaje }, indice) => {
-      const abierto = escaneoMensajeAbierto === indice;
-      const etiquetaBoton = mensaje.length
-        ? mensaje.slice().sort((a, b) => a - b).join(" - ")
-        : "Mensaje…";
-      const dropdownMensaje =
+    .map(({ imei, mensaje, destino, reparacion, categoria }, indice) => {
+      const camposCierre =
         escaneoModo === "cerrar"
           ? `
         <div class="tk-mensaje-dropdown">
           <button type="button" class="tk-mensaje-dropdown-boton" data-indice="${indice}"
-                  aria-haspopup="true" aria-expanded="${abierto}">${escaparHtml(etiquetaBoton)}</button>
-          <div class="tk-mensaje-dropdown-panel" role="group" aria-label="Mensaje de ${escaparHtml(imei)}" ${abierto ? "" : "hidden"}>
+                  aria-haspopup="true" aria-expanded="false">${escaparHtml(etiquetaMensaje(mensaje))}</button>
+          <div class="tk-mensaje-dropdown-panel" role="group" aria-label="Mensaje de ${escaparHtml(imei)}" hidden>
             ${[1, 2, 3, 4, 5]
               .map(
                 (n) => `
@@ -745,16 +754,34 @@ function renderizarListaEscaneo() {
               )
               .join("")}
           </div>
-        </div>`
+        </div>
+        <select class="tk-escaneo-campo" data-indice="${indice}" data-campo="destino" aria-label="Destino de ${escaparHtml(imei)}">
+          ${opcionesSelect("Destino…", ESCANEO_DESTINOS, destino)}
+        </select>
+        <input type="text" class="tk-escaneo-campo tk-escaneo-reparacion" data-indice="${indice}" data-campo="reparacion"
+               placeholder="Reparación" value="${escaparHtml(reparacion)}" aria-label="Reparación de ${escaparHtml(imei)}" />
+        <select class="tk-escaneo-campo" data-indice="${indice}" data-campo="categoria" aria-label="Categoría de ${escaparHtml(imei)}">
+          ${opcionesSelect("Categoría…", ESCANEO_CATEGORIAS_REPARACION, categoria)}
+        </select>`
           : "";
       return `
       <div class="tk-foto-seleccionada">
         <span class="tk-foto-seleccionada-nombre">${escaparHtml(imei)}</span>
-        ${dropdownMensaje}
+        ${camposCierre}
         <button type="button" class="tk-foto-quitar" data-indice="${indice}" aria-label="Quitar ${escaparHtml(imei)}">✕</button>
       </div>`;
     })
     .join("");
+}
+
+// Se cierra tocando el DOM (sin re-renderizar) para no quitarle el foco
+// al campo "Reparación" si el clic que cierra el menú cae ahí.
+function cerrarMenusMensaje(excepto) {
+  el.escaneoLista.querySelectorAll(".tk-mensaje-dropdown").forEach((menu) => {
+    if (menu === excepto) return;
+    menu.querySelector(".tk-mensaje-dropdown-panel").hidden = true;
+    menu.querySelector(".tk-mensaje-dropdown-boton").setAttribute("aria-expanded", "false");
+  });
 }
 
 function agregarImeiEscaneo(valorCrudo) {
@@ -769,7 +796,7 @@ function agregarImeiEscaneo(valorCrudo) {
     el.escaneoStatus.classList.add("is-error");
     return;
   }
-  escaneoImeis.push({ imei, mensaje: [] });
+  escaneoImeis.push({ imei, mensaje: [], destino: "", reparacion: "", categoria: "" });
   el.escaneoStatus.textContent = "";
   el.escaneoStatus.classList.remove("is-error");
   renderizarListaEscaneo();
@@ -777,15 +804,13 @@ function agregarImeiEscaneo(valorCrudo) {
 
 function quitarImeiEscaneo(indice) {
   escaneoImeis.splice(indice, 1);
-  escaneoMensajeAbierto = null; // el índice abierto ya no es válido tras el splice
   renderizarListaEscaneo();
 }
 
 function actualizarModoEscaneo() {
   escaneoModo = el.escaneoModoCerrar.checked ? "cerrar" : "abrir";
   el.escaneoCamposAbrir.hidden = escaneoModo === "cerrar";
-  escaneoMensajeAbierto = null;
-  renderizarListaEscaneo(); // muestra/oculta el selector de mensaje por IMEI
+  renderizarListaEscaneo(); // muestra/oculta los campos de cierre por IMEI
 }
 
 async function aceptarEscaneo() {
@@ -811,15 +836,19 @@ async function aceptarEscaneo() {
     parametros.set("categoria", categoria);
     parametros.set("imeis", JSON.stringify(escaneoImeis.map((item) => item.imei)));
   } else {
-    const sinMensaje = escaneoImeis.filter((item) => item.mensaje.length === 0);
-    if (sinMensaje.length) {
-      el.escaneoStatus.textContent = `Elige el/los mensaje(s) (1 al 5) de: ${sinMensaje.map((item) => item.imei).join(", ")}.`;
+    const sinCategoria = escaneoImeis.filter((item) => item.reparacion.trim() && !item.categoria);
+    if (sinCategoria.length) {
+      el.escaneoStatus.textContent = `Elige la categoría de la reparación de: ${sinCategoria.map((item) => item.imei).join(", ")}.`;
       el.escaneoStatus.classList.add("is-error");
       return;
     }
     const items = escaneoImeis.map((item) => ({
       imei: item.imei,
       mensaje: item.mensaje.slice().sort((a, b) => a - b).join(" - "),
+      destino: item.destino,
+      reparacion: item.reparacion.trim(),
+      categoria: item.categoria,
+      modelo: (mapaImeiTaller.get(item.imei) || {}).modelo || "",
     }));
     parametros.set("imeis", JSON.stringify(items));
   }
@@ -838,12 +867,12 @@ async function aceptarEscaneo() {
       const aviso = datos.noEncontrados.length
         ? ` No se encontró abierto: ${datos.noEncontrados.join(", ")}.`
         : "";
-      el.escaneoStatus.textContent = `${datos.cerrados.length} cerrado(s).${aviso}`;
+      const reparados = datos.reparados ? ` ${datos.reparados} reparación(es) anotada(s).` : "";
+      el.escaneoStatus.textContent = `${datos.cerrados.length} cerrado(s).${reparados}${aviso}`;
       if (datos.noEncontrados.length) el.escaneoStatus.classList.add("is-error");
     }
 
     escaneoImeis = [];
-    escaneoMensajeAbierto = null;
     renderizarListaEscaneo();
     cargarEntregas(); // refresca "Equipos por técnico" con el cambio recién hecho
   } catch (error) {
@@ -1196,35 +1225,47 @@ el.escaneoLista.addEventListener("click", (evento) => {
   }
   const boton = evento.target.closest(".tk-mensaje-dropdown-boton");
   if (boton) {
-    const indice = Number(boton.dataset.indice);
-    escaneoMensajeAbierto = escaneoMensajeAbierto === indice ? null : indice;
-    renderizarListaEscaneo();
+    const menu = boton.closest(".tk-mensaje-dropdown");
+    const panel = menu.querySelector(".tk-mensaje-dropdown-panel");
+    cerrarMenusMensaje(menu);
+    panel.hidden = !panel.hidden;
+    boton.setAttribute("aria-expanded", String(!panel.hidden));
   }
 });
 el.escaneoLista.addEventListener("change", (evento) => {
   const casilla = evento.target.closest(".tk-mensaje-dropdown-panel input[type=checkbox]");
-  if (!casilla) return;
-  const indice = Number(casilla.dataset.indice);
-  const valor = Number(casilla.dataset.valor);
-  const item = escaneoImeis[indice];
-  if (!item) return;
-  if (casilla.checked) {
-    if (!item.mensaje.includes(valor)) item.mensaje.push(valor);
-  } else {
-    item.mensaje = item.mensaje.filter((n) => n !== valor);
+  if (casilla) {
+    const item = escaneoImeis[Number(casilla.dataset.indice)];
+    if (!item) return;
+    const valor = Number(casilla.dataset.valor);
+    if (casilla.checked) {
+      if (!item.mensaje.includes(valor)) item.mensaje.push(valor);
+    } else {
+      item.mensaje = item.mensaje.filter((n) => n !== valor);
+    }
+    casilla.closest(".tk-mensaje-dropdown").querySelector(".tk-mensaje-dropdown-boton").textContent =
+      etiquetaMensaje(item.mensaje);
+    return;
   }
-  renderizarListaEscaneo(); // refresca la etiqueta del botón ("1 - 3 - 5")
+  const campo = evento.target.closest("select.tk-escaneo-campo");
+  if (campo) {
+    const item = escaneoImeis[Number(campo.dataset.indice)];
+    if (item) item[campo.dataset.campo] = campo.value;
+  }
+});
+el.escaneoLista.addEventListener("input", (evento) => {
+  const campo = evento.target.closest("input.tk-escaneo-campo");
+  if (!campo) return;
+  const item = escaneoImeis[Number(campo.dataset.indice)];
+  if (item) item[campo.dataset.campo] = campo.value;
 });
 // Cierra el desplegable de "Mensaje" al hacer clic fuera de él.
 document.addEventListener("click", (evento) => {
-  if (escaneoMensajeAbierto === null) return;
   if (evento.target.closest(".tk-mensaje-dropdown")) return;
-  escaneoMensajeAbierto = null;
-  renderizarListaEscaneo();
+  cerrarMenusMensaje(null);
 });
 el.escaneoBtnLimpiar.addEventListener("click", () => {
   escaneoImeis = [];
-  escaneoMensajeAbierto = null;
   el.escaneoStatus.textContent = "";
   el.escaneoStatus.classList.remove("is-error");
   renderizarListaEscaneo();

@@ -1390,6 +1390,26 @@ main {
   display: none;
 }
 
+#escaneo-lista .tk-foto-seleccionada {
+  flex-wrap: wrap;
+}
+
+.tk-escaneo-campo {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--panel-alt);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tk-escaneo-reparacion {
+  width: 220px;
+  max-width: 100%;
+}
+
 .tk-mensaje-dropdown {
   position: relative;
   flex: 0 0 auto;
