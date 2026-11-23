@@ -14,6 +14,9 @@
 //                        (botón "Actualizar" del panel).
 //   ?imei=XXXX        -> filas completas cuyo IMEI o IMEI 2 contiene
 //                        ese texto (máx. 20), para el buscador.
+//   ?entregas=1       -> equipos por técnico (hoja aparte "Equipos por
+//                        tecnico", pestaña del mes actual). Sin caché:
+//                        es una hoja chica que se actualiza todo el día.
 //
 // ANTES DE USAR: ejecuta una vez `instalarActualizacionAutomatica`
 // desde el editor. Crea un disparador que renueva la caché cada 10
@@ -35,14 +38,17 @@ const COLUMNAS_PANEL = [
   "MODELO",
   "CAPACIDAD",
   "COLOR",
+  "GRADO",
   "LOTE",
   "IMEI",
 ];
 const COLUMNAS_CON_FECHA = ["FECHA DE PULIDO", "FECHA CAMBIO BATERIA", "FECHA DE CHEQUEO"];
 
-const CACHE_PREFIJO = "prod_v3"; // súbelo si cambias COLUMNAS_PANEL, para no servir una caché con columnas viejas
+const CACHE_PREFIJO = "prod_v4"; // súbelo si cambias COLUMNAS_PANEL, para no servir una caché con columnas viejas
 // v3: se agregó IMEI, para que Garantías (apps-script/garantias.gs) pueda
 // cruzar sus tickets de RepairDesk con el modelo/capacidad/color de aquí.
+// v4: se agregó GRADO, para cruzar por IMEI con "Equipos por técnico"
+// y mostrar modelo/capacidad/color/grado en esa lista.
 const CACHE_TTL_SEG = 1500; // 25 min; el disparador la renueva cada 10 — el margen extra
 // evita que la caché quede fría si algún disparo del trigger se demora
 // o falla (Garantías depende de este caché para cruzar por IMEI, así
@@ -60,6 +66,8 @@ function doGet(e) {
   try {
     if (params.imei) {
       json = JSON.stringify(buscarPorImei(params.imei));
+    } else if (params.entregas) {
+      json = obtenerEntregasJson();
     } else {
       json = obtenerResumenJson(params.fresco === "1");
     }
@@ -244,4 +252,73 @@ function buscarPorImei(texto) {
   });
 
   return { total: numerosDeFila.length, filas: filas };
+}
+
+// ------------------------------------------------------------
+// Equipos por técnico (hoja APARTE: "Equipos por tecnico", no vive en
+// la misma spreadsheet que TALLER1). Una pestaña nueva por mes
+// ("Noviembre", "Diciembre"...), así que se busca la del mes actual
+// automáticamente — no hay que tocar nada cuando cambie el mes.
+// ------------------------------------------------------------
+const ENTREGAS_SPREADSHEET_ID = "1539b7k8GOR26F6azcGbIcgGqoHTEnsYYvbRLN2Oh80g";
+// "FECHA C."/"HORA C." (columnas bajo el grupo "CERRADO"): cuándo el
+// técnico entregó el equipo — quedan vacías mientras sigue ABIERTO.
+const ENTREGAS_COLUMNAS = ["FECHA", "HORA", "IMEI", "TECNICO", "CATEGORIA", "ESTADO", "FECHA C.", "HORA C."];
+const ENTREGAS_COLUMNAS_FECHA = ["FECHA", "FECHA C."];
+const ENTREGAS_COLUMNAS_HORA = ["HORA", "HORA C."];
+const MESES_ES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+function obtenerEntregasJson() {
+  const inicio = Date.now();
+  const libro = SpreadsheetApp.openById(ENTREGAS_SPREADSHEET_ID);
+  const nombreMes = MESES_ES[new Date().getMonth()];
+  const hoja = libro.getSheetByName(nombreMes);
+  if (!hoja) throw new Error('No existe la pestaña "' + nombreMes + '" en "Equipos por tecnico".');
+
+  const datos = hoja.getDataRange().getValues();
+  const { indiceFila, cabecera } = encontrarCabeceraEntregas(datos);
+  const indices = ENTREGAS_COLUMNAS.map(nombre => {
+    const i = cabecera.indexOf(nombre);
+    if (i === -1) throw new Error('Falta la columna "' + nombre + '" en la pestaña "' + nombreMes + '".');
+    return i;
+  });
+
+  const zona = libro.getSpreadsheetTimeZone();
+  const filas = [];
+  for (let r = indiceFila + 1; r < datos.length; r++) {
+    const valores = indices.map(col => datos[r][col]);
+    const fila = valores.map((valor, j) => {
+      const nombreColumna = ENTREGAS_COLUMNAS[j];
+      const esFecha = ENTREGAS_COLUMNAS_FECHA.indexOf(nombreColumna) !== -1;
+      const esHora = ENTREGAS_COLUMNAS_HORA.indexOf(nombreColumna) !== -1;
+      if ((esFecha || esHora) && valor instanceof Date && !isNaN(valor)) {
+        return Utilities.formatDate(valor, zona, esFecha ? "yyyy-MM-dd" : "HH:mm");
+      }
+      return valor === null || valor === undefined ? "" : String(valor).trim();
+    });
+    if (fila.some(celda => celda !== "")) filas.push(fila);
+  }
+
+  return JSON.stringify({
+    columnas: ENTREGAS_COLUMNAS,
+    filas: filas,
+    generado: new Date().toISOString(),
+    ms: { total: Date.now() - inicio },
+  });
+}
+
+// La hoja trae una fila vacía arriba (los encabezados no están en la
+// fila 1), así que se busca la fila que de verdad tiene "FECHA" y
+// "TECNICO" en vez de asumir un número de fila fijo.
+function encontrarCabeceraEntregas(datos) {
+  for (let r = 0; r < Math.min(5, datos.length); r++) {
+    const fila = datos[r].map(c => String(c).trim());
+    if (fila.indexOf("FECHA") !== -1 && fila.indexOf("TECNICO") !== -1) {
+      return { indiceFila: r, cabecera: fila };
+    }
+  }
+  throw new Error('No se encontró la fila de encabezados ("FECHA"/"TECNICO") en la pestaña de entregas.');
 }

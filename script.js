@@ -23,6 +23,11 @@ const historialImeiCache = new Map();
 // de este arreglo y lo volvemos a filtrar — nunca volvemos a pedirle
 // los datos a Google a menos que el usuario le dé "Actualizar".
 let registrosOriginales = [];
+let registrosEntregas = []; // hoja aparte "Equipos por tecnico" (ver cargarEntregas)
+let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de TALLER1), para enriquecer "Equipos por técnico"
+// "abierto" (por defecto, al entrar): solo ABIERTO, ignorando el rango
+// de fechas. "mostrar": todo (abierto + cerrado), respetando el rango.
+let modoEntregas = "abierto";
 let cargando = false;
 let esPrimeraCarga = true; // solo queremos fijar "último día" al abrir la página, no cada Actualizar
 
@@ -52,6 +57,14 @@ const el = {
   rankingChequeo: document.getElementById("ranking-chequeo"),
 
   tablaModelos: document.querySelector("#tabla-modelos tbody"),
+  tablaEntregas: document.querySelector("#tabla-entregas tbody"),
+  entregasFechaDesde: document.getElementById("entregas-fecha-desde"),
+  entregasFechaHasta: document.getElementById("entregas-fecha-hasta"),
+  entregasBtnMostrar: document.getElementById("entregas-btn-mostrar"),
+  entregasBtnAbierto: document.getElementById("entregas-btn-abierto"),
+  entregasTotalAbiertos: document.getElementById("entregas-total-abiertos"),
+  entregasTotalCerrados: document.getElementById("entregas-total-cerrados"),
+  entregasTotalGeneral: document.getElementById("entregas-total-general"),
 
   ultimaActualizacion: document.getElementById("ultima-actualizacion"),
 
@@ -174,6 +187,8 @@ async function cargarDatos(forzar = false) {
     );
 
     registrosOriginales = datos.filas.map((fila) => normalizarRegistro(filaAObjeto(datos.columnas, fila)));
+    mapaImeiTaller = construirMapaImei(registrosOriginales);
+    renderizarEntregasFiltradas(); // por si ya habían cargado antes que TALLER1
 
     poblarSelectorDeLotes(registrosOriginales);
     mostrarRangoDeFechasDisponible(registrosOriginales);
@@ -194,6 +209,42 @@ async function cargarDatos(forzar = false) {
     cargando = false;
     el.btnRefrescar.classList.remove("is-loading");
   }
+}
+
+// Hoja APARTE ("Equipos por tecnico"), independiente de TALLER1: se
+// carga y se avisa de errores por su cuenta, para que un problema acá
+// no tumbe el resto del panel (mismo criterio que otras secciones
+// secundarias del dashboard).
+async function cargarEntregas() {
+  try {
+    const datos = await cargarViaJSONP(`${APPS_SCRIPT_URL}?entregas=1`);
+    if (datos && datos.error) throw new Error(datos.error);
+    if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
+      throw new Error("Formato inesperado: publica la última versión de apps-script/produccion.gs.");
+    }
+    registrosEntregas = datos.filas.map((fila) => normalizarEntrega(filaAObjeto(datos.columnas, fila)));
+    mostrarUltimaFechaEntregas(registrosEntregas);
+    renderizarEntregasFiltradas();
+  } catch (error) {
+    console.error("No se pudieron cargar los equipos por técnico:", error);
+    el.tablaEntregas.innerHTML =
+      `<tr><td colspan="4" class="ranking-empty">No se pudo cargar (${escaparHtml(error.message)}).</td></tr>`;
+  }
+}
+
+function normalizarEntrega(fila) {
+  return {
+    fecha: fila["FECHA"] || "",
+    hora: fila["HORA"] || "",
+    imei: String(fila["IMEI"] || "").trim(),
+    tecnico: normalizarNombre(fila["TECNICO"]),
+    categoria: String(fila["CATEGORIA"] || "").trim(),
+    estado: String(fila["ESTADO"] || "").trim().toUpperCase(),
+    // Cuándo el técnico entregó el equipo (columnas "FECHA C."/"HORA
+    // C." bajo el grupo "CERRADO") — vacío mientras sigue ABIERTO.
+    fechaEntrega: fila["FECHA C."] || "",
+    horaEntrega: fila["HORA C."] || "",
+  };
 }
 
 // El script envía las filas como listas cortas (sin repetir el nombre
@@ -218,10 +269,14 @@ function normalizarRegistro(fila) {
     modelo: fila["MODELO"] || "",
     capacidad: fila["CAPACIDAD"] || "",
     color: normalizarNombre(fila["COLOR"]) || "SIN COLOR",
+    grado: (fila["GRADO"] || "").trim(),
     pulido: (fila["PULIDO"] || "").trim().toUpperCase(),
     tecnicoBateria: normalizarNombre(fila["BATERIA"]),
     tecnicoChequeo: normalizarNombre(fila["CHEQUEO"]),
     lote: (fila["LOTE"] || "Sin lote").trim() || "Sin lote",
+    // Para cruzar con "Equipos por técnico" (misma hoja de donde ya
+    // viene IMEI para Garantías, ver arriba).
+    imei: String(fila["IMEI"] || "").trim(),
   };
 }
 
@@ -229,6 +284,17 @@ function normalizarRegistro(fila) {
 // no aparezca repetido en el ranking.
 function normalizarNombre(valor) {
   return String(valor || "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+// IMEI -> {modelo, capacidad, color, grado}, para que "Equipos por
+// técnico" (otra hoja, que solo trae IMEI/estado/categoría) pueda
+// mostrar también el modelo/color/etc. que sí vive en TALLER1.
+function construirMapaImei(registros) {
+  const mapa = new Map();
+  registros.forEach((r) => {
+    if (r.imei) mapa.set(r.imei, { modelo: r.modelo, capacidad: r.capacidad, color: r.color, grado: r.grado });
+  });
+  return mapa;
 }
 
 // Le muestra al usuario qué rango de fechas existe realmente en los
@@ -387,6 +453,28 @@ function contarModelos(registros) {
     .sort((a, b) => b.cantidad - a.cantidad);
 }
 
+// Agrupa los equipos de la hoja "Equipos por tecnico" por técnico,
+// contando cuántos están ABIERTO (todavía en su mesa) y cuántos
+// CERRADO (ya no los tiene), y guardando la lista completa para el
+// detalle desplegable.
+function agruparEntregasPorTecnico(registros) {
+  const grupos = new Map();
+  registros.forEach((r) => {
+    if (!r.tecnico) return;
+    if (!grupos.has(r.tecnico)) {
+      grupos.set(r.tecnico, { tecnico: r.tecnico, abiertos: 0, cerrados: 0, equipos: [] });
+    }
+    const grupo = grupos.get(r.tecnico);
+    if (r.estado === "ABIERTO") grupo.abiertos++;
+    else if (r.estado === "CERRADO") grupo.cerrados++;
+    // Datos del equipo (modelo/capacidad/color/grado) no viven en esta
+    // hoja — se cruzan por IMEI con lo que ya trajo TALLER1.
+    const datosTaller = mapaImeiTaller.get(r.imei);
+    grupo.equipos.push({ ...r, ...(datosTaller || {}) });
+  });
+  return [...grupos.values()].sort((a, b) => (b.abiertos + b.cerrados) - (a.abiertos + a.cerrados));
+}
+
 // ============================================================
 // 6. RENDERIZADO
 // ============================================================
@@ -436,6 +524,44 @@ function aplicarFiltrosYRenderizar() {
   renderizarRanking(el.rankingChequeo, contarPorCampo(registrosChequeo, "tecnicoChequeo"));
   // Solo equipos que tuvieron chequeo en el rango (no cualquier actividad).
   renderizarTablaModelos(contarModelos(registrosChequeo));
+}
+
+// "Equipos por tecnico" es una hoja totalmente aparte (distinta
+// spreadsheet, distinta columna de fecha) — tiene su PROPIO filtro de
+// fechas (#entregas-fecha-desde/hasta), independiente del Desde/Hasta
+// general de arriba, que es solo para TALLER1.
+//
+// Dos modos (botones "Mostrar"/"Abierto", ver sección 9):
+//   "abierto" (por defecto, al entrar): solo los ABIERTO, SIN
+//             importar el rango de fechas — para ver de un vistazo
+//             quién tiene equipos pendientes ahora mismo.
+//   "mostrar": todo (abiertos + cerrados), respetando el rango Desde/Hasta.
+function renderizarEntregasFiltradas() {
+  const filtrados =
+    modoEntregas === "abierto"
+      ? registrosEntregas.filter((r) => r.estado === "ABIERTO")
+      : registrosEntregas.filter((r) => {
+          const desde = el.entregasFechaDesde.value || null;
+          const hasta = el.entregasFechaHasta.value || null;
+          return fechaDentroDeRango(r.fecha, desde, hasta);
+        });
+  renderizarTablaEntregas(agruparEntregasPorTecnico(filtrados));
+}
+
+function actualizarBotonesModoEntregas() {
+  el.entregasBtnMostrar.classList.toggle("is-active", modoEntregas === "mostrar");
+  el.entregasBtnAbierto.classList.toggle("is-active", modoEntregas === "abierto");
+}
+
+// Al cargar por primera vez, deja seleccionado el día más reciente que
+// SÍ tiene datos (si el usuario ya eligió algo, no se lo pisamos).
+function mostrarUltimaFechaEntregas(registros) {
+  if (el.entregasFechaDesde.value || el.entregasFechaHasta.value) return;
+  const fechas = registros.map((r) => r.fecha).filter(Boolean).sort();
+  if (fechas.length === 0) return;
+  const ultima = fechas[fechas.length - 1];
+  el.entregasFechaDesde.value = ultima;
+  el.entregasFechaHasta.value = ultima;
 }
 
 function renderizarHero({ total, baterias, chequeos, pulidos }) {
@@ -502,6 +628,70 @@ function alternarColores(filaModelo) {
   const abierta = filaModelo.getAttribute("aria-expanded") === "true";
   filaModelo.setAttribute("aria-expanded", String(!abierta));
   filaModelo.nextElementSibling.hidden = abierta;
+}
+
+// Mismo patrón "fila clicable + detalle desplegable" que Modelos
+// (reutiliza las clases .fila-modelo/.fila-colores/.lista-colores y el
+// propio alternarColores — es el mismo comportamiento, solo cambia el
+// contenido). IDs con prefijo distinto ("equipos-entrega-N") para no
+// chocar con los de #tabla-modelos.
+function renderizarTablaEntregas(filas) {
+  const totalAbiertos = filas.reduce((suma, f) => suma + f.abiertos, 0);
+  const totalCerrados = filas.reduce((suma, f) => suma + f.cerrados, 0);
+  el.entregasTotalAbiertos.textContent = `(${totalAbiertos})`;
+  el.entregasTotalCerrados.textContent = `(${totalCerrados})`;
+  el.entregasTotalGeneral.textContent = `(${totalAbiertos + totalCerrados})`;
+
+  if (filas.length === 0) {
+    el.tablaEntregas.innerHTML =
+      '<tr><td colspan="4" class="ranking-empty">Sin datos en este rango.</td></tr>';
+    return;
+  }
+
+  el.tablaEntregas.innerHTML = filas
+    .map((f, i) => {
+      const filasEquipo = f.equipos
+        .map((e) => {
+          const clase = e.estado === "ABIERTO" ? "badge-estado--warn" : "badge-estado--good";
+          return `
+            <tr>
+              <td>${escaparHtml(formatearFechaClave(e.fecha))}</td>
+              <td>${escaparHtml(e.hora || "—")}</td>
+              <td>${escaparHtml(e.imei || "—")}</td>
+              <td>${escaparHtml(e.modelo || "—")}</td>
+              <td>${escaparHtml(e.capacidad || "—")}</td>
+              <td>${escaparHtml(e.color || "—")}</td>
+              <td>${escaparHtml(e.grado || "—")}</td>
+              <td>${escaparHtml(e.categoria || "—")}</td>
+              <td><span class="badge-estado ${clase}">${escaparHtml(e.estado)}</span></td>
+              <td>${escaparHtml(formatearFechaClave(e.fechaEntrega))}</td>
+              <td>${escaparHtml(e.horaEntrega || "—")}</td>
+            </tr>`;
+        })
+        .join("");
+      const equipos = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Fecha</th><th>Hora</th><th>IMEI</th><th>Modelo</th><th>Capacidad</th>
+              <th>Color</th><th>Grado</th><th>Categoría</th><th>Estado</th>
+              <th>Fecha entrega</th><th>Hora entrega</th>
+            </tr>
+          </thead>
+          <tbody>${filasEquipo}</tbody>
+        </table>`;
+      return `
+      <tr class="fila-modelo" tabindex="0" role="button" aria-expanded="false" aria-controls="equipos-entrega-${i}">
+        <td><span class="chevron" aria-hidden="true">▸</span>${escaparHtml(f.tecnico)}</td>
+        <td>${f.abiertos}</td>
+        <td>${f.cerrados}</td>
+        <td>${f.abiertos + f.cerrados}</td>
+      </tr>
+      <tr class="fila-colores" id="equipos-entrega-${i}" hidden>
+        <td colspan="4">${equipos}</td>
+      </tr>`;
+    })
+    .join("");
 }
 
 // ============================================================
@@ -808,9 +998,25 @@ function escaparHtml(texto) {
 // ============================================================
 // 9. EVENTOS
 // ============================================================
-el.btnRefrescar.addEventListener("click", () => cargarDatos(true));
+el.btnRefrescar.addEventListener("click", () => {
+  cargarDatos(true);
+  cargarEntregas();
+});
 el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
 el.fechaHasta.addEventListener("change", aplicarFiltrosYRenderizar);
+el.entregasFechaDesde.addEventListener("change", renderizarEntregasFiltradas);
+el.entregasFechaHasta.addEventListener("change", renderizarEntregasFiltradas);
+el.entregasBtnMostrar.addEventListener("click", () => {
+  modoEntregas = "mostrar";
+  actualizarBotonesModoEntregas();
+  renderizarEntregasFiltradas();
+});
+el.entregasBtnAbierto.addEventListener("click", () => {
+  modoEntregas = "abierto";
+  actualizarBotonesModoEntregas();
+  renderizarEntregasFiltradas();
+});
+actualizarBotonesModoEntregas(); // estado visual inicial ("Abierto" activo)
 el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
 el.buscadorImei.addEventListener("input", programarBusquedaImei);
 if (el.btnTema) {
@@ -831,6 +1037,17 @@ el.tablaModelos.addEventListener("keydown", (evento) => {
     alternarColores(fila);
   }
 });
+el.tablaEntregas.addEventListener("click", (evento) => {
+  const fila = evento.target.closest(".fila-modelo");
+  if (fila) alternarColores(fila);
+});
+el.tablaEntregas.addEventListener("keydown", (evento) => {
+  const fila = evento.target.closest(".fila-modelo");
+  if (fila && (evento.key === "Enter" || evento.key === " ")) {
+    evento.preventDefault();
+    alternarColores(fila);
+  }
+});
 
 // ============================================================
 // 10. NAVEGACIÓN ENTRE VISTAS
@@ -838,7 +1055,12 @@ el.tablaModelos.addEventListener("keydown", (evento) => {
 // Cada vista registra su cargador en `cargadoresDeVista`. Al abrir la
 // página se lanzan TODOS a la vez, así los datos de cada pestaña ya
 // están listos (o casi) cuando el usuario cambia de una a otra.
-const cargadoresDeVista = { produccion: cargarDatos };
+const cargadoresDeVista = {
+  produccion: () => {
+    cargarDatos();
+    cargarEntregas();
+  },
+};
 
 function mostrarVista(nombre) {
   if (!document.getElementById(`vista-${nombre}`)) nombre = "produccion";

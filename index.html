@@ -172,6 +172,35 @@
           </div>
         </section>
 
+        <section class="panel panel-wide">
+          <div class="panel-title-fila">
+            <h2 class="panel-title">Equipos por técnico</h2>
+            <div class="controls controls--compactas">
+              <label class="control">
+                <span class="control-label">Desde</span>
+                <input type="date" id="entregas-fecha-desde" />
+              </label>
+              <label class="control">
+                <span class="control-label">Hasta</span>
+                <input type="date" id="entregas-fecha-hasta" />
+              </label>
+              <button type="button" class="btn-refresh" id="entregas-btn-mostrar">Mostrar</button>
+              <button type="button" class="btn-refresh" id="entregas-btn-abierto">Abierto</button>
+            </div>
+          </div>
+          <table class="data-table" id="tabla-entregas">
+            <thead>
+              <tr>
+                <th>Técnico</th>
+                <th>Abiertos <span class="panel-title-count" id="entregas-total-abiertos"></span></th>
+                <th>Cerrados <span class="panel-title-count" id="entregas-total-cerrados"></span></th>
+                <th>Total <span class="panel-title-count" id="entregas-total-general"></span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
       </main>
 
       <footer class="footer">
