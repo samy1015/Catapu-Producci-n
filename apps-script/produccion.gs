@@ -401,8 +401,8 @@ function abrirEquipos(hoja, imeis, tecnico, categoria) {
     fila[colHora] = ahora; // misma fecha/hora en las 2 celdas: cada una se
                             // formatea distinto al leer (yyyy-MM-dd / HH:mm)
     fila[colImei] = imei;
-    fila[colTecnico] = tecnico;
-    fila[colCategoria] = categoria;
+    fila[colTecnico] = tecnico.toUpperCase();
+    fila[colCategoria] = categoria.toUpperCase();
     fila[colEstado] = "ABIERTO";
     return fila;
   });
@@ -464,7 +464,7 @@ function cerrarEnHoja(hoja, item) {
       hoja.getRange(filaReal, colFechaC + 1).setValue(ahora);
       hoja.getRange(filaReal, colHoraC + 1).setValue(ahora);
       if (colMensaje !== -1 && item.mensaje) hoja.getRange(filaReal, colMensaje + 1).setValue(item.mensaje);
-      if (colDestino !== -1 && item.destino) hoja.getRange(filaReal, colDestino + 1).setValue(item.destino);
+      if (colDestino !== -1 && item.destino) hoja.getRange(filaReal, colDestino + 1).setValue(item.destino.toUpperCase());
       return colTecnico !== -1 ? String(datos[r][colTecnico] || "").trim() : "";
     }
   }

@@ -813,7 +813,7 @@ function agregarImeiEscaneo(valorCrudo) {
 }
 
 function nuevoItemEscaneo(imei) {
-  return { imei, mensaje: [], destino: "", reparacion: "", categoria: "", tecnicoReparacion: "" };
+  return { imei, mensaje: [], destino: "Encaje", reparacion: "", categoria: "", tecnicoReparacion: "" };
 }
 
 // Lista pegada (una por línea, o separada por espacios/comas/punto y coma).
