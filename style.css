@@ -328,6 +328,158 @@ input[type="date"]:focus, select:focus, .search-box:focus {
 }
 
 /* ============================================
+   SELECCIÓN MÚLTIPLE (filtro de Lote en Producción)
+   ============================================ */
+.multiselect {
+  position: relative;
+}
+
+.multiselect-boton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 190px;
+  max-width: 240px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* Flecha como la de un <select> */
+.multiselect-boton::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: -4px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.multiselect-boton[aria-expanded="true"]::after {
+  transform: rotate(-135deg);
+  margin-top: 3px;
+}
+
+.multiselect-boton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.multiselect-texto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiselect-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.multiselect-panel[hidden] {
+  display: none;
+}
+
+.multiselect-buscar {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--panel-alt);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.multiselect-buscar:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.multiselect-todos {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.multiselect-todos:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.multiselect-lista {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.multiselect-opcion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.multiselect-opcion:hover {
+  background: var(--panel-alt);
+}
+
+.multiselect-opcion[hidden] {
+  display: none;
+}
+
+.multiselect-opcion input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .multiselect-boton {
+    width: 100%;
+    max-width: none;
+  }
+  .multiselect-panel {
+    left: 0;
+    right: auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+/* ============================================
    SUBPESTAÑAS (Producción: Resumen / Equipos por técnico)
    ============================================ */
 .subpestanas {
@@ -579,6 +731,45 @@ main {
 
 .resumen-grid .ranking-value {
   color: var(--text);
+}
+
+/* Técnicos de "Equipos chequeados": clic = filtrar la tabla de modelos. */
+.ranking-row--seleccionable {
+  cursor: pointer;
+  margin: -4px -8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.ranking-row--seleccionable:hover {
+  background: var(--panel-alt);
+}
+
+.ranking-row--seleccionable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.ranking-row--seleccionable.is-seleccionada {
+  background: var(--panel-alt);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.ranking-row--seleccionable.is-seleccionada .ranking-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Con un técnico elegido, "Equipos encajados" invita a volver a la lista general. */
+.resumen-encajados.is-filtrando {
+  cursor: pointer;
+  border-radius: 16px;
+  transition: background-color 0.15s ease;
+}
+
+.resumen-encajados.is-filtrando:hover {
+  background: var(--panel-alt);
 }
 
 /* --- Encajados por modelo --- */

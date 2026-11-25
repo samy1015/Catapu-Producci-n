@@ -100,12 +100,24 @@
             <span class="control-label">Hasta</span>
             <input type="date" id="fecha-hasta" />
           </label>
-          <label class="control solo-resumen">
-            <span class="control-label">Lote</span>
-            <select id="filtro-lote">
-              <option value="">Todos</option>
-            </select>
-          </label>
+          <!-- Lote: selección múltiple (ver poblarSelectorDeLotes en script.js).
+               Ninguno marcado = todos los lotes. -->
+          <div class="control solo-resumen">
+            <span class="control-label" id="filtro-lote-etiqueta">Lote</span>
+            <div class="multiselect" id="filtro-lote">
+              <button type="button" class="multiselect-boton" id="filtro-lote-boton"
+                      aria-haspopup="true" aria-expanded="false" aria-controls="filtro-lote-panel"
+                      aria-labelledby="filtro-lote-etiqueta filtro-lote-texto">
+                <span class="multiselect-texto" id="filtro-lote-texto">Todos</span>
+              </button>
+              <div class="multiselect-panel" id="filtro-lote-panel" hidden>
+                <input type="search" class="multiselect-buscar" id="filtro-lote-buscar"
+                       placeholder="Buscar lote…" autocomplete="off" aria-label="Buscar lote" />
+                <button type="button" class="multiselect-todos" id="filtro-lote-todos">Todos los lotes</button>
+                <div class="multiselect-lista" id="filtro-lote-lista" role="group" aria-label="Lotes"></div>
+              </div>
+            </div>
+          </div>
           <button id="btn-refrescar" class="btn-refresh" title="Volver a cargar datos">
             <span class="refresh-icon">↻</span> Actualizar
           </button>
@@ -146,7 +158,8 @@
           </div>
 
           <!-- Equipos encajados (= chequeados) -->
-          <div class="resumen-encajados">
+          <!-- Clic aquí = quitar el filtro por técnico (ver seleccionarTecnicoChequeo) -->
+          <div class="resumen-encajados" id="resumen-encajados" title="Ver todos los técnicos">
             <h2 class="resumen-encajados-titulo">Equipos encajados</h2>
             <span class="resumen-encajados-numero" id="stat-encajados">—</span>
             <span class="resumen-encajados-detalle" id="resumen-detalle-filtros"></span>
@@ -169,7 +182,7 @@
           </div>
 
           <div class="panel resumen-modelos">
-            <h2 class="panel-title">Encajados por modelo</h2>
+            <h2 class="panel-title" id="titulo-modelos">Encajados por modelo</h2>
             <table class="data-table tabla-modelos" id="tabla-modelos">
               <thead>
                 <tr><th>Modelo</th><th>Cap.</th><th class="num">Cant.</th></tr>

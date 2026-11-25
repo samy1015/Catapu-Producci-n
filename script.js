@@ -46,6 +46,12 @@ const el = {
   fechaDesde: document.getElementById("fecha-desde"),
   fechaHasta: document.getElementById("fecha-hasta"),
   filtroLote: document.getElementById("filtro-lote"),
+  filtroLoteBoton: document.getElementById("filtro-lote-boton"),
+  filtroLoteTexto: document.getElementById("filtro-lote-texto"),
+  filtroLotePanel: document.getElementById("filtro-lote-panel"),
+  filtroLoteBuscar: document.getElementById("filtro-lote-buscar"),
+  filtroLoteTodos: document.getElementById("filtro-lote-todos"),
+  filtroLoteLista: document.getElementById("filtro-lote-lista"),
   btnRefrescar: document.getElementById("btn-refrescar"),
   buscadorImei: document.getElementById("buscador-imei"),
   panelBusquedaImei: document.getElementById("panel-busqueda-imei"),
@@ -57,6 +63,8 @@ const el = {
   barrasChequeo: document.getElementById("barras-chequeo"),
   resumenDetalleFiltros: document.getElementById("resumen-detalle-filtros"),
   modelosCantidad: document.getElementById("modelos-cantidad"),
+  tituloModelos: document.getElementById("titulo-modelos"),
+  resumenEncajados: document.getElementById("resumen-encajados"),
   modelosTotal: document.getElementById("modelos-total"),
 
   rankingBateria: document.getElementById("ranking-bateria"),
@@ -408,22 +416,52 @@ function compararLotes(a, b) {
   return sufijoA < sufijoB ? -1 : sufijoA > sufijoB ? 1 : 0;
 }
 
+// Lotes marcados en el filtro (selección múltiple). Vacío = todos.
+const lotesSeleccionados = new Set();
+
 function poblarSelectorDeLotes(registros) {
-  const loteActual = el.filtroLote.value;
   const lotes = [...new Set(registros.map((r) => r.lote))].sort(compararLotes);
 
-  el.filtroLote.innerHTML = '<option value="">Todos</option>';
-  lotes.forEach((lote) => {
-    const opcion = document.createElement("option");
-    opcion.value = lote;
-    opcion.textContent = lote;
-    el.filtroLote.appendChild(opcion);
+  // Los lotes que estaban marcados y siguen existiendo se mantienen.
+  [...lotesSeleccionados].forEach((lote) => {
+    if (!lotes.includes(lote)) lotesSeleccionados.delete(lote);
   });
 
-  // Si el lote que estaba seleccionado sigue existiendo, lo mantenemos.
-  if (lotes.includes(loteActual)) {
-    el.filtroLote.value = loteActual;
+  el.filtroLoteLista.innerHTML = lotes
+    .map(
+      (lote) => `
+      <label class="multiselect-opcion" data-lote="${escaparHtml(lote)}">
+        <input type="checkbox" value="${escaparHtml(lote)}" ${lotesSeleccionados.has(lote) ? "checked" : ""} />
+        <span>${escaparHtml(lote)}</span>
+      </label>`
+    )
+    .join("");
+  actualizarTextoLotes();
+}
+
+function actualizarTextoLotes() {
+  const elegidos = [...lotesSeleccionados];
+  el.filtroLoteTexto.textContent =
+    elegidos.length === 0 ? "Todos" : elegidos.length === 1 ? elegidos[0] : `${elegidos.length} lotes`;
+  el.filtroLoteBoton.title = elegidos.length > 1 ? elegidos.sort(compararLotes).join(", ") : "";
+  el.filtroLoteTodos.disabled = elegidos.length === 0;
+}
+
+function abrirPanelLotes(abrir) {
+  el.filtroLotePanel.hidden = !abrir;
+  el.filtroLoteBoton.setAttribute("aria-expanded", String(abrir));
+  if (abrir) {
+    el.filtroLoteBuscar.value = "";
+    filtrarListaLotes("");
+    el.filtroLoteBuscar.focus();
   }
+}
+
+function filtrarListaLotes(texto) {
+  const buscado = texto.trim().toUpperCase();
+  el.filtroLoteLista.querySelectorAll(".multiselect-opcion").forEach((opcion) => {
+    opcion.hidden = buscado !== "" && !opcion.dataset.lote.toUpperCase().includes(buscado);
+  });
 }
 
 // ============================================================
@@ -432,8 +470,8 @@ function poblarSelectorDeLotes(registros) {
 // Filtro común para todas las secciones del panel (menos el buscador
 // de IMEI, que ignora todo esto a propósito — ver sección 6).
 function aplicarFiltrosComunes(registros) {
-  const lote = el.filtroLote.value;
-  return registros.filter((r) => !lote || r.lote === lote);
+  if (lotesSeleccionados.size === 0) return registros;
+  return registros.filter((r) => lotesSeleccionados.has(r.lote));
 }
 
 // true si `clave` ("AAAA-MM-DD") cae dentro de [desde, hasta]. Si
@@ -515,7 +553,7 @@ function agruparEntregasPorTecnico(registros) {
 function aplicarFiltrosYRenderizar() {
   const base = aplicarFiltrosComunes(registrosOriginales);
   const { desde, hasta } = obtenerRangosSeleccionados();
-  el.resumenDetalleFiltros.textContent = describirFiltros(desde, hasta, el.filtroLote.value);
+  el.resumenDetalleFiltros.textContent = describirFiltros(desde, hasta, [...lotesSeleccionados]);
 
   if (desde && hasta && desde > hasta) {
     el.avisoRango.hidden = false;
@@ -536,9 +574,19 @@ function aplicarFiltrosYRenderizar() {
 
 // Todo el Resumen sale de los equipos CHEQUEADOS (un equipo chequeado
 // queda listo para encajar), salvo el ranking de cambios de batería.
+// Clic en un técnico de "Equipos chequeados" -> la tabla de modelos
+// muestra solo sus equipos ("Encajados por JACK G."). Clic en "Equipos
+// encajados" (arriba a la derecha) vuelve a la lista general.
+let tecnicoChequeoSeleccionado = null;
+let ultimosRegistrosChequeo = [];
+
 function renderizarResumen(registrosChequeo, registrosBateria) {
   const porTecnicoChequeo = contarPorCampo(registrosChequeo, "tecnicoChequeo");
-  const modelos = contarModelos(registrosChequeo);
+  ultimosRegistrosChequeo = registrosChequeo;
+  // Si al cambiar fechas/lote el técnico elegido ya no tiene equipos, se vuelve a la lista general.
+  if (tecnicoChequeoSeleccionado && !porTecnicoChequeo.some(([n]) => n === tecnicoChequeoSeleccionado)) {
+    tecnicoChequeoSeleccionado = null;
+  }
 
   el.statEncajados.textContent = registrosChequeo.length;
   el.statChequeosRanking.textContent = registrosChequeo.length;
@@ -546,17 +594,49 @@ function renderizarResumen(registrosChequeo, registrosBateria) {
 
   renderizarBarrasVerticales(el.barrasChequeo, porTecnicoChequeo, registrosChequeo.length);
   renderizarRanking(el.rankingBateria, contarPorCampo(registrosBateria, "tecnicoBateria"));
-  renderizarRanking(el.rankingChequeo, porTecnicoChequeo);
+  renderizarRanking(el.rankingChequeo, porTecnicoChequeo, { seleccionable: true, seleccionado: tecnicoChequeoSeleccionado });
+  renderizarModelosEncajados();
+}
+
+function renderizarModelosEncajados() {
+  const tecnico = tecnicoChequeoSeleccionado;
+  const registros = tecnico
+    ? ultimosRegistrosChequeo.filter((r) => r.tecnicoChequeo === tecnico)
+    : ultimosRegistrosChequeo;
+  const modelos = contarModelos(registros);
+
+  el.tituloModelos.textContent = tecnico ? `Encajados por ${tecnico}` : "Encajados por modelo";
+  el.resumenEncajados.classList.toggle("is-filtrando", Boolean(tecnico));
+  // Solo es "botón" (y enfocable con el teclado) mientras hay un técnico elegido.
+  if (tecnico) {
+    el.resumenEncajados.setAttribute("role", "button");
+    el.resumenEncajados.tabIndex = 0;
+  } else {
+    el.resumenEncajados.removeAttribute("role");
+    el.resumenEncajados.removeAttribute("tabindex");
+  }
   renderizarTablaModelos(modelos);
   el.modelosCantidad.textContent = modelos.length ? `${modelos.length} modelo${modelos.length === 1 ? "" : "s"}` : "";
-  el.modelosTotal.textContent = modelos.length ? `Total ${registrosChequeo.length}` : "";
+  el.modelosTotal.textContent = modelos.length ? `Total ${registros.length}` : "";
+}
+
+function seleccionarTecnicoChequeo(nombre) {
+  // Clic otra vez en el mismo técnico = volver a la lista general.
+  tecnicoChequeoSeleccionado = nombre && nombre !== tecnicoChequeoSeleccionado ? nombre : null;
+  el.rankingChequeo.querySelectorAll(".ranking-row").forEach((fila) => {
+    const activa = fila.dataset.nombre === tecnicoChequeoSeleccionado;
+    fila.classList.toggle("is-seleccionada", activa);
+    fila.setAttribute("aria-pressed", String(activa));
+  });
+  renderizarModelosEncajados();
 }
 
 // "17 – 25 nov · todos los lotes" (debajo de "Equipos encajados").
 const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
-function describirFiltros(desde, hasta, lote) {
-  const textoLote = lote ? `lote ${lote}` : "todos los lotes";
+function describirFiltros(desde, hasta, lotes) {
+  const textoLote =
+    lotes.length === 0 ? "todos los lotes" : lotes.length === 1 ? `lote ${lotes[0]}` : `${lotes.length} lotes`;
   if (!desde && !hasta) return `todas las fechas · ${textoLote}`;
 
   const anioActual = new Date().getFullYear();
@@ -645,7 +725,8 @@ function renderizarBarrasVerticales(contenedor, entradas, total) {
     .join("");
 }
 
-function renderizarRanking(contenedor, entradas) {
+// `seleccionable`: cada fila es un botón (ver seleccionarTecnicoChequeo).
+function renderizarRanking(contenedor, entradas, { seleccionable = false, seleccionado = null } = {}) {
   contenedor.innerHTML = "";
 
   if (entradas.length === 0) {
@@ -660,6 +741,15 @@ function renderizarRanking(contenedor, entradas) {
 
     const fila = document.createElement("div");
     fila.className = "ranking-row";
+    if (seleccionable) {
+      fila.classList.add("ranking-row--seleccionable");
+      fila.classList.toggle("is-seleccionada", nombre === seleccionado);
+      fila.dataset.nombre = nombre;
+      fila.tabIndex = 0;
+      fila.setAttribute("role", "button");
+      fila.setAttribute("aria-pressed", String(nombre === seleccionado));
+      fila.title = `Ver los equipos de ${nombre}`;
+    }
     fila.innerHTML = `
       <span class="ranking-name">${escaparHtml(nombre)}</span>
       <span class="ranking-track">
@@ -1424,7 +1514,54 @@ el.escaneoBtnLimpiar.addEventListener("click", () => {
   renderizarListaEscaneo();
 });
 el.escaneoBtnAceptar.addEventListener("click", aceptarEscaneo);
-el.filtroLote.addEventListener("change", aplicarFiltrosYRenderizar);
+// Filtro de lotes (selección múltiple).
+el.filtroLoteBoton.addEventListener("click", () => abrirPanelLotes(el.filtroLotePanel.hidden));
+el.filtroLoteBuscar.addEventListener("input", () => filtrarListaLotes(el.filtroLoteBuscar.value));
+el.filtroLoteLista.addEventListener("change", (evento) => {
+  const casilla = evento.target;
+  if (casilla.checked) lotesSeleccionados.add(casilla.value);
+  else lotesSeleccionados.delete(casilla.value);
+  actualizarTextoLotes();
+  aplicarFiltrosYRenderizar();
+});
+el.filtroLoteTodos.addEventListener("click", () => {
+  lotesSeleccionados.clear();
+  el.filtroLoteLista.querySelectorAll("input").forEach((casilla) => (casilla.checked = false));
+  actualizarTextoLotes();
+  aplicarFiltrosYRenderizar();
+});
+// Se cierra al hacer clic fuera o con Escape.
+document.addEventListener("click", (evento) => {
+  if (!el.filtroLotePanel.hidden && !el.filtroLote.contains(evento.target)) abrirPanelLotes(false);
+});
+el.filtroLote.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && !el.filtroLotePanel.hidden) {
+    abrirPanelLotes(false);
+    el.filtroLoteBoton.focus();
+  }
+});
+
+// Filtro por técnico en "Encajados por modelo" (ver seleccionarTecnicoChequeo).
+el.rankingChequeo.addEventListener("click", (evento) => {
+  const fila = evento.target.closest(".ranking-row--seleccionable");
+  if (fila) seleccionarTecnicoChequeo(fila.dataset.nombre);
+});
+el.rankingChequeo.addEventListener("keydown", (evento) => {
+  const fila = evento.target.closest(".ranking-row--seleccionable");
+  if (fila && (evento.key === "Enter" || evento.key === " ")) {
+    evento.preventDefault();
+    seleccionarTecnicoChequeo(fila.dataset.nombre);
+  }
+});
+el.resumenEncajados.addEventListener("click", () => {
+  if (tecnicoChequeoSeleccionado) seleccionarTecnicoChequeo(null);
+});
+el.resumenEncajados.addEventListener("keydown", (evento) => {
+  if (tecnicoChequeoSeleccionado && (evento.key === "Enter" || evento.key === " ")) {
+    evento.preventDefault();
+    seleccionarTecnicoChequeo(null);
+  }
+});
 el.buscadorImei.addEventListener("input", programarBusquedaImei);
 if (el.btnTema) {
   el.btnTema.addEventListener("click", () => aplicarTema(temaActual() === "light" ? "dark" : "light"));
