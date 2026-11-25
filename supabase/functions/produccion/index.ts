@@ -15,7 +15,7 @@
 // Rutas (GET salvo la última):
 //   ?accion=diagnostico      -> prueba la conexión: lista las pestañas
 //   (sin accion)             -> resumen de la pestaña "2026" para el panel
-//   ?imei=XXXX               -> filas completas cuyo IMEI / imei 2 contiene XXXX
+//   ?imei=XXXX               -> filas completas (pestañas "2026" y "2025") cuyo IMEI / imei 2 contiene XXXX
 //   ?entregas=1              -> pestaña "EQUI. POR TEC."
 //   ?accion=reparaciones[&desde=AAAA-MM-DD][&hasta=AAAA-MM-DD] -> pestaña "REPARADOS"
 //   POST {accion:"registrarEntregas", modo, imeis, tecnico?, categoria?}
@@ -247,9 +247,25 @@ async function leerRango(libro: string, hoja: string, direccion: string): Promis
 }
 
 async function escribirRango(libro: string, hoja: string, direccion: string, values: Celda[][], numberFormat?: (string | null)[][]) {
-  const cuerpo: Record<string, unknown> = { values };
-  if (numberFormat) cuerpo.numberFormat = numberFormat;
-  await graph(rangoUrl(libro, hoja, direccion), { method: "PATCH", body: cuerpo });
+  // Primero el formato (columna por columna, solo donde se indicó) y
+  // después los valores: si van juntos en un mismo PATCH, Excel a veces
+  // deja el formato viejo de la columna (ej. "4:57 PM" en vez de "16:57").
+  if (numberFormat) {
+    const m = direccion.match(/^([A-Z]+)(\d+)/)!;
+    const colInicio = numeroColumna(m[1]), filaInicio = Number(m[2]);
+    const ancho = numberFormat[0]?.length || 0;
+    for (let j = 0; j < ancho; j++) {
+      const formatos = numberFormat.map((f) => f[j]);
+      if (formatos.every((f) => f === null)) continue;
+      const letra = letraColumna(colInicio + j);
+      const rango = `${letra}${filaInicio}:${letra}${filaInicio + numberFormat.length - 1}`;
+      await graph(rangoUrl(libro, hoja, rango), {
+        method: "PATCH",
+        body: { numberFormat: formatos.map((f) => [f ?? "General"]) },
+      });
+    }
+  }
+  await graph(rangoUrl(libro, hoja, direccion), { method: "PATCH", body: { values } });
 }
 
 // Lee solo las columnas pedidas (una petición por columna, en paralelo):
@@ -410,18 +426,41 @@ async function resumen() {
 // ------------------------------------------------------------
 // Búsqueda por IMEI (filas completas)
 // ------------------------------------------------------------
+// Busca en las pestañas de los años (la más reciente primero), sin
+// importar fechas. Cada fila trae "HOJA" para saber de qué año salió.
+const HOJAS_BUSQUEDA_IMEI = ["2026", "2025"];
+
 async function buscarPorImei(textoBuscado: string) {
   const buscado = String(textoBuscado).replace(/\s+/g, "");
   if (buscado.length < 4) return { total: 0, filas: [] };
 
   const libro = await rutaLibro();
-  const { ultimaFila, ultimaColumna } = await tamanoUsado(libro, HOJA_TALLER);
-  if (ultimaFila < 2) return { total: 0, filas: [] };
-  const letraFin = letraColumna(ultimaColumna);
-  const cabecera = (await leerRango(libro, HOJA_TALLER, `A1:${letraFin}1`))[0].map((c) => texto(c));
+  // Las dos pestañas se leen en paralelo; si alguna no existe, se omite.
+  const resultados = await Promise.all(
+    HOJAS_BUSQUEDA_IMEI.map((hoja) =>
+      buscarImeiEnHoja(libro, hoja, buscado).catch((err) => {
+        if (String((err as Error).message).includes("No existe la pestaña")) return { total: 0, filas: [] };
+        throw err;
+      })
+    ),
+  );
+  return {
+    total: resultados.reduce((n, r) => n + r.total, 0),
+    filas: resultados.flatMap((r) => r.filas).slice(0, MAX_RESULTADOS_IMEI),
+  };
+}
 
-  const indicesImei = ["IMEI", "imei 2"].map((n) => cabecera.indexOf(n)).filter((i) => i !== -1);
-  const columnas = await leerColumnas(libro, HOJA_TALLER, indicesImei, 2, ultimaFila);
+async function buscarImeiEnHoja(libro: string, hoja: string, buscado: string) {
+  const { ultimaFila, ultimaColumna } = await tamanoUsado(libro, hoja);
+  if (ultimaFila < 2) return { total: 0, filas: [] as Record<string, Celda>[] };
+  const letraFin = letraColumna(ultimaColumna);
+  const cabecera = (await leerRango(libro, hoja, `A1:${letraFin}1`))[0].map((c) => texto(c));
+
+  // "IMEI" / "imei 2" con cualquier combinación de mayúsculas.
+  const indicesImei = cabecera
+    .map((n, i) => (["IMEI", "IMEI 2"].includes(normalizarCabecera(n)) ? i : -1))
+    .filter((i) => i !== -1);
+  const columnas = await leerColumnas(libro, hoja, indicesImei, 2, ultimaFila);
   const coincidencias = new Set<number>();
   columnas.forEach((col) =>
     col.forEach((v, i) => {
@@ -432,8 +471,8 @@ async function buscarPorImei(textoBuscado: string) {
   const numeros = [...coincidencias].sort((a, b) => a - b);
   const filas = await Promise.all(
     numeros.slice(0, MAX_RESULTADOS_IMEI).map(async (n) => {
-      const valores = (await leerRango(libro, HOJA_TALLER, `A${n}:${letraFin}${n}`))[0] || [];
-      const objeto: Record<string, Celda> = {};
+      const valores = (await leerRango(libro, hoja, `A${n}:${letraFin}${n}`))[0] || [];
+      const objeto: Record<string, Celda> = { HOJA: hoja };
       cabecera.forEach((nombre, i) => {
         if (!nombre) return;
         // Las columnas de fecha viajan como "AAAA-MM-DD" (el panel las muestra en es-PE).
@@ -537,7 +576,7 @@ async function abrirEquipos(imeis: string[], tecnico: string, categoria: string)
     const fila: Celda[] = new Array(ultimaColumna).fill(null);
     const formato: (string | null)[] = new Array(ultimaColumna).fill(null);
     fila[iFecha] = Math.floor(ahora); formato[iFecha] = "dd/mm/yyyy";
-    fila[iHora] = ahora - Math.floor(ahora); formato[iHora] = "hh:mm";
+    fila[iHora] = ahora - Math.floor(ahora); formato[iHora] = "HH:mm";
     fila[iImei] = imeiCelda(imei); formato[iImei] = "0";
     fila[iTecnico] = tecnico.toUpperCase();
     fila[iCategoria] = categoria.toUpperCase();
@@ -604,7 +643,7 @@ async function cerrarEquipos(items: ItemCierre[]) {
     };
     poner(iEstado, "CERRADO");
     poner(iFechaC, Math.floor(ahora), "dd/mm/yyyy");
-    poner(iHoraC, ahora - Math.floor(ahora), "hh:mm");
+    poner(iHoraC, ahora - Math.floor(ahora), "HH:mm");
     if (iMensaje !== -1 && item.mensaje) poner(iMensaje, item.mensaje);
     if (iDestino !== -1 && item.destino) poner(iDestino, item.destino.toUpperCase());
     // Una escritura a la vez: Excel en línea rechaza escrituras simultáneas al mismo archivo.

@@ -961,9 +961,11 @@ async function aceptarEscaneo() {
 // ============================================================
 // Busca en TODA la información sin importar los filtros de fecha o
 // lote. Como el panel ya no descarga las columnas de detalle, la
-// búsqueda se le pide a la función (?imei=...), que devuelve solo las
-// filas que coinciden con todas sus columnas.
+// búsqueda se le pide a la función (?imei=...), que busca en las
+// pestañas "2026" y "2025" y devuelve solo las filas que coinciden,
+// con todas sus columnas ("HOJA" dice de qué pestaña salió).
 const ETIQUETAS_DETALLE_IMEI = [
+  ["HOJA", "Año (hoja)", "texto"],
   ["MODELO", "Modelo", "texto"],
   ["CAPACIDAD", "Capacidad", "texto"],
   ["IMEI", "IMEI", "texto"],
@@ -1008,9 +1010,17 @@ function formatearValorDetalle(valor, tipo) {
   return String(valor);
 }
 
+// Las pestañas de cada año pueden escribir el encabezado distinto
+// ("imei 2" / "IMEI 2", "BATERÍA" / "BATERIA"): se compara sin
+// mayúsculas ni tildes.
+function claveDetalle(texto) {
+  return String(texto).normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+}
+
 function renderizarDetalleImei(registro) {
+  const porClave = new Map(Object.entries(registro).map(([k, v]) => [claveDetalle(k), v]));
   const campos = ETIQUETAS_DETALLE_IMEI.map(([clave, etiqueta, tipo]) => {
-    const valor = formatearValorDetalle(registro[clave], tipo);
+    const valor = formatearValorDetalle(porClave.get(claveDetalle(clave)), tipo);
     return `
       <div class="imei-field">
         <span class="imei-field-label">${escaparHtml(etiqueta)}</span>
@@ -1018,7 +1028,7 @@ function renderizarDetalleImei(registro) {
       </div>`;
   }).join("");
 
-  const imei = String(registro["IMEI"] || "").replace(/\D/g, "");
+  const imei = String(registro["IMEI"] ?? registro["Imei"] ?? registro["imei"] ?? "").replace(/\D/g, "");
 
   return `
     <div class="imei-result-block">
