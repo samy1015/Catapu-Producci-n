@@ -1,7 +1,7 @@
 // ============================================================
 // Edge Function "produccion" (dashboard Catapu)
 // ------------------------------------------------------------
-// Reemplaza a apps-script/produccion.gs y apps-script/reparaciones.gs:
+// Reemplaza a los antiguos Apps Script produccion.gs y reparaciones.gs (borrados; siguen en el historial de git):
 // lee y escribe PRODUCCION.xlsx (OneDrive de serviciotecnico@catapu.com)
 // con Microsoft Graph, usando la app "TallerDashboard" de Entra.
 //
