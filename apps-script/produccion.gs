@@ -1,8 +1,9 @@
 // ============================================================
 // Apps Script de PRODUCCIÓN (dashboard Catapu)
 // ------------------------------------------------------------
-// Va en el proyecto de Apps Script ligado a la spreadsheet con la
-// hoja TALLER1. Es una copia de respaldo: si lo cambias aquí, pégalo
+// Va en el proyecto de Apps Script ligado al documento que tiene las
+// pestañas "2026" (taller), "EQUI. POR TEC." y "REPARADOS". Es una
+// copia de respaldo: si lo cambias aquí, pégalo
 // en el proyecto y publica una "Nueva versión" de la implementación
 // (la URL /exec no cambia). Su URL es APPS_SCRIPT_URL en script.js.
 //
@@ -14,16 +15,17 @@
 //                        (botón "Actualizar" del panel).
 //   ?imei=XXXX        -> filas completas cuyo IMEI o IMEI 2 contiene
 //                        ese texto (máx. 20), para el buscador.
-//   ?entregas=1       -> equipos por técnico (hoja aparte "Equipos por
-//                        tecnico", pestaña del mes actual). Sin caché:
-//                        es una hoja chica que se actualiza todo el día.
+//   ?entregas=1       -> equipos por técnico (pestaña "EQUI. POR TEC.").
+//                        Sin caché: se actualiza todo el día.
+//   ?accion=registrarEntregas -> abre/cierra equipos escaneados desde el
+//                        dashboard (y anota reparaciones en "REPARADOS").
 //
 // ANTES DE USAR: ejecuta una vez `instalarActualizacionAutomatica`
 // desde el editor. Crea un disparador que renueva la caché cada 10
 // minutos, así el panel casi nunca espera a que se lea la hoja.
 // ============================================================
 
-const HOJA_TALLER = "TALLER1";
+const HOJA_TALLER = "2026";
 const MAX_RESULTADOS_IMEI = 20;
 
 // Solo estas columnas viajan al panel (el detalle completo se pide
@@ -257,38 +259,34 @@ function buscarPorImei(texto) {
 }
 
 // ------------------------------------------------------------
-// Equipos por técnico (hoja APARTE: "Equipos por tecnico", no vive en
-// la misma spreadsheet que TALLER1). Una pestaña nueva por mes
-// ("Noviembre", "Diciembre"...), así que se busca la del mes actual
-// automáticamente — no hay que tocar nada cuando cambie el mes.
+// Equipos por técnico (pestaña "EQUI. POR TEC." del mismo documento).
 // ------------------------------------------------------------
-const ENTREGAS_SPREADSHEET_ID = "1539b7k8GOR26F6azcGbIcgGqoHTEnsYYvbRLN2Oh80g";
+const HOJA_ENTREGAS = "EQUI. POR TEC.";
 // "FECHA C."/"HORA C." (columnas bajo el grupo "CERRADO"): cuándo el
 // técnico entregó el equipo — quedan vacías mientras sigue ABIERTO.
 const ENTREGAS_COLUMNAS = ["FECHA", "HORA", "IMEI", "TECNICO", "CATEGORIA", "ESTADO", "FECHA C.", "HORA C."];
 const ENTREGAS_COLUMNAS_FECHA = ["FECHA", "FECHA C."];
 const ENTREGAS_COLUMNAS_HORA = ["HORA", "HORA C."];
-const MESES_ES = [
-  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-];
+
+function obtenerHojaEntregas() {
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_ENTREGAS);
+  if (!hoja) throw new Error('No existe la pestaña "' + HOJA_ENTREGAS + '" en el documento.');
+  return hoja;
+}
 
 function obtenerEntregasJson() {
   const inicio = Date.now();
-  const libro = SpreadsheetApp.openById(ENTREGAS_SPREADSHEET_ID);
-  const nombreMes = MESES_ES[new Date().getMonth()];
-  const hoja = libro.getSheetByName(nombreMes);
-  if (!hoja) throw new Error('No existe la pestaña "' + nombreMes + '" en "Equipos por tecnico".');
+  const hoja = obtenerHojaEntregas();
 
   const datos = hoja.getDataRange().getValues();
   const { indiceFila, cabecera } = encontrarCabeceraEntregas(datos);
   const indices = ENTREGAS_COLUMNAS.map(nombre => {
     const i = cabecera.indexOf(nombre);
-    if (i === -1) throw new Error('Falta la columna "' + nombre + '" en la pestaña "' + nombreMes + '".');
+    if (i === -1) throw new Error('Falta la columna "' + nombre + '" en la pestaña "' + HOJA_ENTREGAS + '".');
     return i;
   });
 
-  const zona = libro.getSpreadsheetTimeZone();
+  const zona = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
   const filas = [];
   for (let r = indiceFila + 1; r < datos.length; r++) {
     const valores = indices.map(col => datos[r][col]);
@@ -327,14 +325,11 @@ function encontrarCabeceraEntregas(datos) {
 
 // ------------------------------------------------------------
 // Escaneo de IMEI desde el dashboard: abrir (nuevo ingreso) o cerrar
-// (entrega) equipos en "Equipos por tecnico". Escribe en la MISMA
-// hoja/pestaña que ya lee obtenerEntregasJson.
+// (entrega) equipos en "EQUI. POR TEC.". Escribe en la MISMA pestaña
+// que ya lee obtenerEntregasJson.
 // ------------------------------------------------------------
 function registrarEntregas(params) {
-  const libro = SpreadsheetApp.openById(ENTREGAS_SPREADSHEET_ID);
-  const nombreMes = MESES_ES[new Date().getMonth()];
-  const hoja = libro.getSheetByName(nombreMes);
-  if (!hoja) throw new Error('No existe la pestaña "' + nombreMes + '" en "Equipos por tecnico".');
+  const hoja = obtenerHojaEntregas();
 
   if (params.modo === "abrir") {
     let imeis;
@@ -366,7 +361,7 @@ function registrarEntregas(params) {
       throw new Error("Lista de IMEI inválida.");
     }
     if (!items.length) throw new Error("No hay ningún IMEI para procesar.");
-    return cerrarEquipos(libro, hoja, nombreMes, items);
+    return cerrarEquipos(hoja, items);
   }
 
   throw new Error('Modo desconocido: "' + params.modo + '".');
@@ -412,19 +407,12 @@ function abrirEquipos(hoja, imeis, tecnico, categoria) {
   return { ok: true, agregados: imeis.length };
 }
 
-// Por cada ítem {imei, mensaje}, busca primero en la pestaña del mes
-// actual y, si no aparece, en la del mes anterior (por si se abrió a
-// fin de mes y se cierra a inicios del siguiente).
-function cerrarEquipos(libro, hojaActual, nombreMesActual, items) {
-  const indiceMes = MESES_ES.indexOf(nombreMesActual);
-  const hojaAnterior = libro.getSheetByName(MESES_ES[(indiceMes + 11) % 12]);
-
+function cerrarEquipos(hoja, items) {
   const cerrados = [];
   const noEncontrados = [];
   const reparaciones = [];
   items.forEach(item => {
-    let tecnico = cerrarEnHoja(hojaActual, item);
-    if (tecnico === null && hojaAnterior) tecnico = cerrarEnHoja(hojaAnterior, item);
+    const tecnico = cerrarEnHoja(hoja, item);
     if (tecnico === null) {
       noEncontrados.push(item.imei);
       return;
@@ -472,10 +460,9 @@ function cerrarEnHoja(hoja, item) {
 }
 
 // ------------------------------------------------------------
-// "EQUIPOS REPARADOS" (otra spreadsheet, pestaña REPARADOS): una fila
-// por cada equipo cerrado al que se le anotó una reparación.
+// Equipos reparados (pestaña del mismo documento): una fila por cada
+// equipo cerrado al que se le anotó una reparación.
 // ------------------------------------------------------------
-const REPARADOS_SPREADSHEET_ID = "10bs8xnHtiaLsTQAxwxKzrO69LO3nvIny7IvM9NVv_4Y";
 const REPARADOS_HOJA = "REPARADOS";
 
 // "FECHA DE REPARACIÓN" con o sin tilde, mayúsculas o no, da igual.
@@ -484,14 +471,14 @@ function normalizarCabecera(texto) {
 }
 
 function anotarReparaciones(reparaciones) {
-  const hoja = SpreadsheetApp.openById(REPARADOS_SPREADSHEET_ID).getSheetByName(REPARADOS_HOJA);
-  if (!hoja) throw new Error('No existe la pestaña "' + REPARADOS_HOJA + '" en "EQUIPOS REPARADOS".');
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPARADOS_HOJA);
+  if (!hoja) throw new Error('No existe la pestaña "' + REPARADOS_HOJA + '" en el documento.');
 
   const totalColumnas = hoja.getLastColumn();
   const cabecera = hoja.getRange(1, 1, 1, totalColumnas).getValues()[0].map(normalizarCabecera);
   const col = nombre => {
     const i = cabecera.indexOf(nombre);
-    if (i === -1) throw new Error('Falta la columna "' + nombre + '" en "EQUIPOS REPARADOS".');
+    if (i === -1) throw new Error('Falta la columna "' + nombre + '" en la pestaña ' + REPARADOS_HOJA + '.');
     return i;
   };
   const colFecha = col("FECHA DE REPARACION");

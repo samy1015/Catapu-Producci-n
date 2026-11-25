@@ -1,11 +1,8 @@
 // ============================================================
 // 1. CONFIGURACIÓN
 // ============================================================
-// Esta es la URL de tu Apps Script (la que termina en /exec).
-// Si vuelves a implementar una "Nueva versión" del script, la URL
-// no cambia, así que normalmente no necesitas tocar esto de nuevo.
-const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbxIRRSKngAHHfxOMtb-bNCDnWzPiU353fCy0-PFVkWXftGAM6Mkw1tcwEWrclyKgag9pg/exec";
+// Producción y Reparación leen PRODUCCION.xlsx (Microsoft 365) vía la
+// Edge Function de Supabase: ver llamarExcel más abajo.
 
 // Script de Correos/JotForm (apps-script/correos.gs), creado dentro de
 // catapu.serviciotecnico@gmail.com. Da el historial de un IMEI: falla
@@ -182,6 +179,45 @@ function cargarViaJSONP(url) {
   });
 }
 
+// Producción y Reparación ya no van por Apps Script: leen y escriben
+// PRODUCCION.xlsx (OneDrive de Microsoft 365) a través de la Edge
+// Function "produccion" de Supabase (supabase/functions/produccion).
+// Solo responde con la sesión del usuario logueado.
+// `parametros`: objeto para la URL (GET); `cuerpo`: si viene, va por POST.
+const URL_FUNCION_PRODUCCION = `${SUPABASE_URL}/functions/v1/produccion`;
+
+async function llamarExcel(parametros = {}, cuerpo = null) {
+  const { data } = await supabaseCliente.auth.getSession();
+  const token = data.session && data.session.access_token;
+  if (!token) throw new Error("La sesión expiró. Vuelve a iniciar sesión.");
+
+  const consulta = new URLSearchParams(parametros).toString();
+  const control = new AbortController();
+  const temporizador = setTimeout(() => control.abort(), TIMEOUT_CARGA_MS);
+  try {
+    const respuesta = await fetch(consulta ? `${URL_FUNCION_PRODUCCION}?${consulta}` : URL_FUNCION_PRODUCCION, {
+      method: cuerpo ? "POST" : "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: SUPABASE_ANON_KEY,
+        ...(cuerpo ? { "Content-Type": "application/json" } : {}),
+      },
+      body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+      signal: control.signal,
+    });
+    const datos = await respuesta.json().catch(() => null);
+    if (!datos) throw new Error(`Respuesta inválida del servidor (${respuesta.status}).`);
+    if (datos.error) throw new Error(datos.error);
+    if (!respuesta.ok) throw new Error(datos.message || datos.msg || `Error ${respuesta.status}`);
+    return datos;
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("Excel no respondió a tiempo.");
+    throw error;
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
+
 // `forzar` = true (botón Actualizar) le pide al script que ignore su
 // caché y relea la hoja: es más lento, pero trae lo último. La carga
 // inicial usa la caché del script y suele responder en pocos segundos.
@@ -194,10 +230,9 @@ async function cargarDatos(forzar = false) {
 
   try {
     const inicio = performance.now();
-    const datos = await cargarViaJSONP(forzar ? `${APPS_SCRIPT_URL}?fresco=1` : APPS_SCRIPT_URL);
-    if (datos && datos.error) throw new Error(datos.error);
+    const datos = await llamarExcel(forzar ? { fresco: "1" } : {});
     if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
-      throw new Error("Formato inesperado: publica la última versión de apps-script/produccion.gs.");
+      throw new Error("Formato inesperado: despliega la última versión de supabase/functions/produccion.");
     }
     console.info(
       `Producción: ${datos.filas.length} filas en ${Math.round(performance.now() - inicio)} ms ` +
@@ -235,10 +270,9 @@ async function cargarDatos(forzar = false) {
 // secundarias del dashboard).
 async function cargarEntregas() {
   try {
-    const datos = await cargarViaJSONP(`${APPS_SCRIPT_URL}?entregas=1`);
-    if (datos && datos.error) throw new Error(datos.error);
+    const datos = await llamarExcel({ entregas: "1" });
     if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
-      throw new Error("Formato inesperado: publica la última versión de apps-script/produccion.gs.");
+      throw new Error("Formato inesperado: despliega la última versión de supabase/functions/produccion.");
     }
     registrosEntregas = datos.filas.map((fila) => normalizarEntrega(filaAObjeto(datos.columnas, fila)));
     mostrarUltimaFechaEntregas(registrosEntregas);
@@ -864,9 +898,7 @@ async function aceptarEscaneo() {
     return;
   }
 
-  const parametros = new URLSearchParams();
-  parametros.set("accion", "registrarEntregas");
-  parametros.set("modo", escaneoModo);
+  const cuerpo = { accion: "registrarEntregas", modo: escaneoModo };
 
   if (escaneoModo === "abrir") {
     const tecnico = el.escaneoTecnico.value;
@@ -876,9 +908,9 @@ async function aceptarEscaneo() {
       el.escaneoStatus.classList.add("is-error");
       return;
     }
-    parametros.set("tecnico", tecnico.toUpperCase());
-    parametros.set("categoria", categoria);
-    parametros.set("imeis", JSON.stringify(escaneoImeis.map((item) => item.imei)));
+    cuerpo.tecnico = tecnico.toUpperCase();
+    cuerpo.categoria = categoria;
+    cuerpo.imeis = escaneoImeis.map((item) => item.imei);
   } else {
     const sinCategoria = escaneoImeis.filter((item) => item.reparacion.trim() && !item.categoria);
     if (sinCategoria.length) {
@@ -895,7 +927,7 @@ async function aceptarEscaneo() {
       tecnicoReparacion: item.tecnicoReparacion.toUpperCase(),
       modelo: (mapaImeiTaller.get(item.imei) || {}).modelo || "",
     }));
-    parametros.set("imeis", JSON.stringify(items));
+    cuerpo.imeis = items;
   }
 
   el.escaneoBtnAceptar.disabled = true;
@@ -903,8 +935,7 @@ async function aceptarEscaneo() {
   el.escaneoStatus.textContent = "Guardando…";
 
   try {
-    const datos = await cargarViaJSONP(`${APPS_SCRIPT_URL}?${parametros.toString()}`);
-    if (datos && datos.error) throw new Error(datos.error);
+    const datos = await llamarExcel({}, cuerpo);
 
     if (escaneoModo === "abrir") {
       el.escaneoStatus.textContent = `${datos.agregados} equipo(s) agregado(s).`;
@@ -1190,10 +1221,8 @@ async function buscarPorImei() {
   el.resultadoImei.innerHTML = '<p class="imei-not-found">Buscando…</p>';
 
   try {
-    const url = `${APPS_SCRIPT_URL}?imei=${encodeURIComponent(busquedaLimpia)}`;
-    const respuesta = await cargarViaJSONP(url);
+    const respuesta = await llamarExcel({ imei: busquedaLimpia });
     if (id !== idBusquedaImei) return; // el usuario ya escribió otra cosa
-    if (respuesta.error) throw new Error(respuesta.error);
 
     if (respuesta.filas.length === 0) {
       el.resultadoImei.innerHTML =

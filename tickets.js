@@ -10,8 +10,8 @@
 // Se carga después de auth.js y script.js, y reutiliza sus globales:
 // supabaseCliente (ya logueado — las políticas de "tickets" exigen
 // sesión iniciada), escaparHtml, formatearFechaClave, cargarViaJSONP,
-// APPS_SCRIPT_URL (esta última solo para autocompletar el modelo por
-// IMEI, buscando en la misma hoja de Producción).
+// llamarExcel (esta última solo para autocompletar el modelo por
+// IMEI, buscando en PRODUCCION.xlsx).
 (function () {
   const cliente = supabaseCliente;
 
@@ -815,8 +815,8 @@
     if (imei.length < MIN_DIGITOS_AUTOCOMPLETAR || modeloEditadoManualmente) return;
 
     try {
-      const respuesta = await cargarViaJSONP(`${APPS_SCRIPT_URL}?imei=${encodeURIComponent(imei)}`);
-      if (respuesta.error || !respuesta.filas || !respuesta.filas.length) return;
+      const respuesta = await llamarExcel({ imei });
+      if (!respuesta.filas || !respuesta.filas.length) return;
       const modelo = respuesta.filas[0]["MODELO"];
       if (modelo && !modeloEditadoManualmente) ui.fModelo.value = modelo;
     } catch (error) {

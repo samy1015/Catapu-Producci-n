@@ -2,13 +2,9 @@
 // VISTA REPARACIÓN
 // ============================================================
 // Se carga después de script.js y reutiliza sus utilidades globales:
-// cargarViaJSONP, filaAObjeto, normalizarNombre, contarPorCampo,
+// llamarExcel, filaAObjeto, normalizarNombre, contarPorCampo,
 // renderizarRanking y escaparHtml.
 (function () {
-  // Script ligado a la spreadsheet "EQUIPOS REPARADOS" (apps-script/reparaciones.gs).
-  const URL_REPARACIONES =
-    "https://script.google.com/macros/s/AKfycbwlfxSe6qziEjuWZ9zrmebF5AKFIEuMGW4etHy6Mp4GCAZuy-6eNZR03keFnk98YFX8SA/exec";
-
   // Colores del gráfico de dona. Cada porción también lleva su nombre y
   // porcentaje en la leyenda, así que el color nunca es lo único que
   // la distingue.
@@ -58,18 +54,15 @@
     ui.status.classList.remove("is-error");
 
     try {
-      const parametros = [];
-      if (cobertura) parametros.push(`desde=${cobertura}`);
-      if (forzar) parametros.push("fresco=1");
-      const url = parametros.length ? `${URL_REPARACIONES}?${parametros.join("&")}` : URL_REPARACIONES;
+      const parametros = { accion: "reparaciones" };
+      if (cobertura) parametros.desde = cobertura;
 
       const inicio = performance.now();
-      const datos = await cargarViaJSONP(url);
+      // Pestaña "REPARADOS" de PRODUCCION.xlsx, vía la Edge Function (llamarExcel en script.js).
+      const datos = await llamarExcel(parametros);
       if (id !== idCarga) return; // ya se pidió otra cosa más reciente
-      // El script devuelve { error: "..." } cuando algo falla de su lado.
-      if (datos && datos.error) throw new Error(datos.error);
       if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
-        throw new Error("Formato inesperado: publica la última versión de apps-script/reparaciones.gs.");
+        throw new Error("Formato inesperado: despliega la última versión de supabase/functions/produccion.");
       }
       console.info(
         `Reparación: ${datos.filas.length} filas en ${Math.round(performance.now() - inicio)} ms ` +
