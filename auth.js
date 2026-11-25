@@ -32,8 +32,8 @@ const elLogin = {
 
 let appIniciada = false;
 
-// La clave para Producción/Reparación/Garantías/Correos (Apps Script,
-// que no usan Supabase) vive en la tabla "config_privada", legible
+// La clave para los Apps Script que quedan (Garantías, Correos y Orden
+// de ingreso / Informe técnico, que no usan Supabase) vive en la tabla "config_privada", legible
 // solo por cuentas logueadas — cargarViaJSONP (script.js) la agrega
 // sola a cada pedido una vez que queda en window.claveAppsScript.
 async function cargarClaveAppsScript() {

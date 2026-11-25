@@ -18,10 +18,10 @@ const historialImeiCache = new Map();
 // Aquí guardamos en memoria todos los registros que trae la hoja,
 // sin filtrar. Cada vez que el usuario cambia un filtro, partimos
 // de este arreglo y lo volvemos a filtrar — nunca volvemos a pedirle
-// los datos a Google a menos que el usuario le dé "Actualizar".
+// los datos a menos que el usuario le dé "Actualizar".
 let registrosOriginales = [];
-let registrosEntregas = []; // hoja aparte "Equipos por tecnico" (ver cargarEntregas)
-let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de TALLER1), para enriquecer "Equipos por técnico"
+let registrosEntregas = []; // pestaña "EQUI. POR TEC." (ver cargarEntregas)
+let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de la pestaña "2026"), para enriquecer "Equipos por técnico"
 // "abierto" (por defecto, al entrar): solo ABIERTO, ignorando el rango
 // de fechas. "mostrar": todo (abierto + cerrado), respetando el rango.
 let modoEntregas = "abierto";
@@ -124,15 +124,13 @@ actualizarBotonTema(temaActual()); // sincroniza el ícono con lo que el <head> 
 // ============================================================
 // 3. CARGA DE DATOS
 // ============================================================
-// Google Apps Script no agrega el encabezado que los navegadores
-// exigen para leer una respuesta con fetch() desde otro origen
-// (esto se llama CORS). La forma estándar de evitar ese bloqueo es
-// JSONP: en vez de pedir los datos con fetch, los pedimos con una
-// etiqueta <script>, que no está sujeta a esa restricción. El propio
-// Apps Script (ver el doGet actualizado) envuelve el JSON en una
-// llamada a la función que le indiquemos por la URL.
+// Los Apps Script que quedan (Garantías y Correos) no agregan el
+// encabezado que los navegadores exigen para leer una respuesta con
+// fetch() desde otro origen (CORS). Por eso se piden con JSONP: una
+// etiqueta <script>, que no tiene esa restricción. El Apps Script
+// envuelve el JSON en una llamada a la función que le indiquemos.
 let contadorCallbacks = 0;
-const TIMEOUT_CARGA_MS = 120000; // margen amplio: la carga "en frío" (sin caché) puede tardar
+const TIMEOUT_CARGA_MS = 120000; // margen amplio: la primera carga del día puede tardar
 
 function cargarViaJSONP(url) {
   return new Promise((resolve, reject) => {
@@ -164,7 +162,7 @@ function cargarViaJSONP(url) {
     };
 
     // window.claveAppsScript la deja auth.js apenas hay sesión (viene de
-    // Supabase, tabla "config_privada"): los 4 Apps Script la exigen en
+    // Supabase, tabla "config_privada"): los Apps Script la exigen en
     // su doGet antes de responder nada, así que se agrega sola acá para
     // no tener que tocar cada llamada por separado.
     const separador = url.includes("?") ? "&" : "?";
@@ -218,10 +216,8 @@ async function llamarExcel(parametros = {}, cuerpo = null) {
   }
 }
 
-// `forzar` = true (botón Actualizar) le pide al script que ignore su
-// caché y relea la hoja: es más lento, pero trae lo último. La carga
-// inicial usa la caché del script y suele responder en pocos segundos.
-async function cargarDatos(forzar = false) {
+// Pestaña "2026" de PRODUCCION.xlsx. Siempre trae lo último del Excel.
+async function cargarDatos() {
   if (cargando) return; // ignora clics repetidos mientras hay una carga en curso
   cargando = true;
   el.btnRefrescar.classList.add("is-loading");
@@ -230,18 +226,18 @@ async function cargarDatos(forzar = false) {
 
   try {
     const inicio = performance.now();
-    const datos = await llamarExcel(forzar ? { fresco: "1" } : {});
+    const datos = await llamarExcel();
     if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
       throw new Error("Formato inesperado: despliega la última versión de supabase/functions/produccion.");
     }
     console.info(
       `Producción: ${datos.filas.length} filas en ${Math.round(performance.now() - inicio)} ms ` +
-      `(datos generados ${datos.generado}; el script tardó ${JSON.stringify(datos.ms)} ms)`
+      `(la función tardó ${JSON.stringify(datos.ms)} ms)`
     );
 
     registrosOriginales = datos.filas.map((fila) => normalizarRegistro(filaAObjeto(datos.columnas, fila)));
     mapaImeiTaller = construirMapaImei(registrosOriginales);
-    renderizarEntregasFiltradas(); // por si ya habían cargado antes que TALLER1
+    renderizarEntregasFiltradas(); // por si "Equipos por técnico" cargó antes
 
     poblarSelectorDeLotes(registrosOriginales);
     mostrarRangoDeFechasDisponible(registrosOriginales);
@@ -255,7 +251,7 @@ async function cargarDatos(forzar = false) {
   } catch (error) {
     console.error(error);
     el.statusLine.textContent =
-      "No se pudieron cargar los datos. Revisa tu conexión o la URL del script. (" +
+      "No se pudieron cargar los datos. (" +
       error.message + ")";
     el.statusLine.classList.add("is-error");
   } finally {
@@ -264,7 +260,7 @@ async function cargarDatos(forzar = false) {
   }
 }
 
-// Hoja APARTE ("Equipos por tecnico"), independiente de TALLER1: se
+// Pestaña APARTE ("EQUI. POR TEC."), independiente de "2026": se
 // carga y se avisa de errores por su cuenta, para que un problema acá
 // no tumbe el resto del panel (mismo criterio que otras secciones
 // secundarias del dashboard).
@@ -340,7 +336,7 @@ function normalizarNombre(valor) {
 
 // IMEI -> {modelo, capacidad, color, grado}, para que "Equipos por
 // técnico" (otra hoja, que solo trae IMEI/estado/categoría) pueda
-// mostrar también el modelo/color/etc. que sí vive en TALLER1.
+// mostrar también el modelo/color/etc. que sí vive en la pestaña "2026".
 function construirMapaImei(registros) {
   const mapa = new Map();
   registros.forEach((r) => {
@@ -520,7 +516,7 @@ function agruparEntregasPorTecnico(registros) {
     if (r.estado === "ABIERTO") grupo.abiertos++;
     else if (r.estado === "CERRADO") grupo.cerrados++;
     // Datos del equipo (modelo/capacidad/color/grado) no viven en esta
-    // hoja — se cruzan por IMEI con lo que ya trajo TALLER1.
+    // pestaña — se cruzan por IMEI con lo que ya trajo "2026".
     const datosTaller = mapaImeiTaller.get(r.imei);
     grupo.equipos.push({ ...r, ...(datosTaller || {}) });
   });
@@ -578,10 +574,10 @@ function aplicarFiltrosYRenderizar() {
   renderizarTablaModelos(contarModelos(registrosChequeo));
 }
 
-// "Equipos por tecnico" es una hoja totalmente aparte (distinta
-// spreadsheet, distinta columna de fecha) — tiene su PROPIO filtro de
+// "Equipos por técnico" es una pestaña aparte ("EQUI. POR TEC.",
+// con otra columna de fecha) — tiene su PROPIO filtro de
 // fechas (#entregas-fecha-desde/hasta), independiente del Desde/Hasta
-// general de arriba, que es solo para TALLER1.
+// general de arriba, que es solo para la pestaña "2026".
 //
 // Dos modos (botones "Mostrar"/"Abierto", ver sección 9):
 //   "abierto" (por defecto, al entrar): solo los ABIERTO, SIN
@@ -965,7 +961,7 @@ async function aceptarEscaneo() {
 // ============================================================
 // Busca en TODA la información sin importar los filtros de fecha o
 // lote. Como el panel ya no descarga las columnas de detalle, la
-// búsqueda se le pide al Apps Script (?imei=...), que devuelve solo las
+// búsqueda se le pide a la función (?imei=...), que devuelve solo las
 // filas que coinciden con todas sus columnas.
 const ETIQUETAS_DETALLE_IMEI = [
   ["MODELO", "Modelo", "texto"],
@@ -1263,7 +1259,7 @@ function escaparHtml(texto) {
 // 9. EVENTOS
 // ============================================================
 el.btnRefrescar.addEventListener("click", () => {
-  cargarDatos(true);
+  cargarDatos();
   cargarEntregas();
 });
 el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);

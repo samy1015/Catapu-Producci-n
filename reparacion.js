@@ -45,9 +45,7 @@
   // ----------------------------------------------------------
   // Carga los datos desde `cobertura`. La usan la carga inicial, el botón
   // Actualizar y los cambios de fecha que salen del rango ya cargado.
-  // `forzar` (solo el botón Actualizar) le pide al script que ignore su
-  // caché y relea la hoja: es más lento, pero trae lo último.
-  async function cargarReparaciones(forzar = false) {
+  async function cargarReparaciones() {
     const id = ++idCarga;
     ui.btn.classList.add("is-loading");
     ui.status.textContent = "Cargando datos…";
@@ -66,7 +64,7 @@
       }
       console.info(
         `Reparación: ${datos.filas.length} filas en ${Math.round(performance.now() - inicio)} ms ` +
-        `(datos generados ${datos.generado}; el script tardó ${JSON.stringify(datos.ms)} ms)`
+        `(la función tardó ${JSON.stringify(datos.ms)} ms)`
       );
 
       registros = datos.filas.map((fila) => normalizar(filaAObjeto(datos.columnas, fila)));
@@ -329,7 +327,7 @@
   // ----------------------------------------------------------
   // Eventos y registro en la navegación
   // ----------------------------------------------------------
-  ui.btn.addEventListener("click", () => cargarReparaciones(true));
+  ui.btn.addEventListener("click", () => cargarReparaciones());
   ui.desde.addEventListener("change", alCambiarFecha);
   ui.hasta.addEventListener("change", alCambiarFecha);
   ui.tecnico.addEventListener("change", renderizar);

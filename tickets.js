@@ -2,7 +2,7 @@
 // VISTA TICKETS (ingreso propio de equipos — reemplaza a RepairDesk
 // para Garantía y Servicio Técnico)
 // ------------------------------------------------------------
-// A diferencia de las otras 3 vistas, esta NO pasa por Apps Script:
+// Los tickets NO pasan por Apps Script:
 // habla directo con Supabase desde el navegador con su librería
 // (cargada en index.html antes de este archivo). Ver supabase/*.sql
 // para la tabla, sus políticas de acceso y el bucket de fotos.
@@ -798,7 +798,7 @@
   // Autocompletar el modelo a partir del IMEI (busca en Producción,
   // que es donde queda registrado el modelo de cada equipo que vendió
   // o reparó Catapu — mismo endpoint que ya usa el buscador de IMEI de
-  // esa pestaña, vía APPS_SCRIPT_URL de script.js).
+  // esa pestaña, vía llamarExcel de script.js).
   // ----------------------------------------------------------
   const MIN_DIGITOS_AUTOCOMPLETAR = 6;
   let temporizadorAutocompletar = null;
