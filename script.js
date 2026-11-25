@@ -1003,6 +1003,37 @@ function actualizarModoEscaneo() {
   renderizarListaEscaneo(); // muestra/oculta los campos de cierre por IMEI
 }
 
+// Refleja en registrosEntregas lo que el servidor acaba de escribir
+// (mismas reglas: abrir agrega filas ABIERTO; cerrar marca la fila
+// ABIERTO más reciente de cada IMEI), sin esperar a releer el Excel.
+function aplicarEscaneoLocal(cuerpo, datos) {
+  const ahora = new Date();
+  const dos = (n) => String(n).padStart(2, "0");
+  const fecha = `${ahora.getFullYear()}-${dos(ahora.getMonth() + 1)}-${dos(ahora.getDate())}`;
+  const hora = `${dos(ahora.getHours())}:${dos(ahora.getMinutes())}`;
+
+  if (cuerpo.modo === "abrir") {
+    cuerpo.imeis.forEach((imei) => {
+      registrosEntregas.push({
+        fecha, hora, imei, tecnico: normalizarNombre(cuerpo.tecnico),
+        categoria: String(cuerpo.categoria).toUpperCase(), estado: "ABIERTO",
+        fechaEntrega: "", horaEntrega: "",
+      });
+    });
+  } else {
+    (datos.cerrados || []).forEach((imei) => {
+      for (let i = registrosEntregas.length - 1; i >= 0; i--) {
+        const r = registrosEntregas[i];
+        if (r.imei === imei && r.estado === "ABIERTO") {
+          registrosEntregas[i] = { ...r, estado: "CERRADO", fechaEntrega: fecha, horaEntrega: hora };
+          break;
+        }
+      }
+    });
+  }
+  renderizarEntregasFiltradas();
+}
+
 async function aceptarEscaneo() {
   if (escaneoImeis.length === 0) {
     el.escaneoStatus.textContent = "Escanea al menos un IMEI antes de aceptar.";
@@ -1060,9 +1091,12 @@ async function aceptarEscaneo() {
       if (datos.noEncontrados.length) el.escaneoStatus.classList.add("is-error");
     }
 
+    // La tabla se actualiza al toque con lo que se acaba de guardar, y
+    // después se recarga de verdad desde el Excel (por detrás).
+    aplicarEscaneoLocal(cuerpo, datos);
     escaneoImeis = [];
     renderizarListaEscaneo();
-    cargarEntregas(); // refresca "Equipos por técnico" con el cambio recién hecho
+    cargarEntregas();
   } catch (error) {
     console.error(error);
     el.escaneoStatus.textContent = "No se pudo guardar. (" + error.message + ")";

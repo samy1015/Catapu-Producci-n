@@ -25,6 +25,9 @@
 // Code ni el editor de Supabase lo marquen en rojo.
 // deno-lint-ignore no-explicit-any
 const entorno = (globalThis as any).Deno;
+// Marca este archivo como módulo, para que VS Code no lo mezcle con
+// script.js (ambos tienen una función buscarPorImei).
+export {};
 
 const TENANT = entorno.env.get("MS_TENANT_ID") ?? "";
 const CLIENT_ID = entorno.env.get("MS_CLIENT_ID") ?? "";
@@ -147,12 +150,17 @@ async function tokenGraph() {
 }
 
 async function graph(ruta: string, opciones: { method?: string; body?: unknown } = {}): Promise<any> {
+  // Ruta que trae una sesión de Excel (ver conSesion): "@sesion:ID@/users/...".
+  const conMarca = ruta.match(/^@sesion:([^@]+)@/);
+  const sesion = conMarca?.[1];
+  if (conMarca) ruta = ruta.slice(conMarca[0].length);
   for (let intento = 0; ; intento++) {
     const resp = await fetch("https://graph.microsoft.com/v1.0" + ruta, {
       method: opciones.method || "GET",
       headers: {
         Authorization: "Bearer " + (await tokenGraph()),
         "Content-Type": "application/json",
+        ...(sesion ? { "workbook-session-id": sesion } : {}),
       },
       body: opciones.body === undefined ? undefined : JSON.stringify(opciones.body),
     });
@@ -183,6 +191,30 @@ async function rutaLibro() {
   const drive = `/users/${encodeURIComponent(USUARIO)}/drive`;
   if (!idArchivoCache) idArchivoCache = (await ubicarArchivo(drive)).id;
   return `${drive}/items/${idArchivoCache}/workbook`;
+}
+
+// Abre una "sesión" de Excel y se la pasa a fn como "libro". Sin sesión,
+// Excel en línea vuelve a abrir el archivo en CADA llamada (lento); con
+// sesión lo mantiene abierto. La sesión viaja pegada al inicio de la
+// ruta del libro y graph() la convierte en la cabecera que pide Microsoft.
+// Si no se puede crear, sigue sin ella.
+async function conSesion<T>(fn: (libro: string) => Promise<T>): Promise<T> {
+  const libro = await rutaLibro();
+  let id = "";
+  try {
+    id = (await graph(`${libro}/createSession`, { method: "POST", body: { persistChanges: true } })).id || "";
+  } catch (err) {
+    console.warn("Sin sesión de Excel:", (err as Error).message);
+  }
+  if (!id) return fn(libro);
+  const libroConSesion = `@sesion:${id}@${libro}`;
+  try {
+    return await fn(libroConSesion);
+  } finally {
+    // Se cierra "por detrás", sin hacer esperar la respuesta.
+    const cerrar = graph(`${libroConSesion}/closeSession`, { method: "POST", body: {} }).catch(() => {});
+    (globalThis as any).EdgeRuntime?.waitUntil?.(cerrar);
+  }
 }
 
 // Primero prueba la ruta exacta (MS_ARCHIVO); si no está ahí, lo busca
@@ -489,8 +521,12 @@ async function buscarImeiEnHoja(libro: string, hoja: string, buscado: string) {
 // ------------------------------------------------------------
 // La cabecera no está en la fila 1: se busca la fila con FECHA y TECNICO.
 async function cabeceraEntregas(libro: string) {
-  const { ultimaFila, ultimaColumna } = await tamanoUsado(libro, HOJA_ENTREGAS);
-  const primeras = await leerRango(libro, HOJA_ENTREGAS, `A1:${letraColumna(ultimaColumna)}5`);
+  // En paralelo: tamaño de la hoja y las primeras filas (hasta la columna
+  // AZ, de sobra) para encontrar los encabezados.
+  const [{ ultimaFila, ultimaColumna }, primeras] = await Promise.all([
+    tamanoUsado(libro, HOJA_ENTREGAS),
+    leerRango(libro, HOJA_ENTREGAS, "A1:AZ5"),
+  ]);
   for (let r = 0; r < primeras.length; r++) {
     const fila = primeras[r].map((c) => texto(c));
     if (fila.includes("FECHA") && fila.includes("TECNICO")) {
@@ -538,7 +574,7 @@ async function registrarEntregas(c: any) {
   if (c.modo === "abrir") {
     const imeis = lista.map(t).filter(Boolean);
     if (!imeis.length) throw new Error("No hay ningún IMEI para procesar.");
-    return abrirEquipos(imeis, t(c.tecnico), t(c.categoria));
+    return conSesion((libro) => abrirEquipos(libro, imeis, t(c.tecnico), t(c.categoria)));
   }
   if (c.modo === "cerrar") {
     const items: ItemCierre[] = lista
@@ -548,7 +584,7 @@ async function registrarEntregas(c: any) {
       }))
       .filter((o: ItemCierre) => o.imei);
     if (!items.length) throw new Error("No hay ningún IMEI para procesar.");
-    return cerrarEquipos(items);
+    return conSesion((libro) => cerrarEquipos(libro, items));
   }
   throw new Error(`Modo desconocido: "${c.modo}".`);
 }
@@ -559,11 +595,10 @@ function imeiCelda(imei: string): Celda {
   return /^\d{1,15}$/.test(imei) ? Number(imei) : imei;
 }
 
-async function abrirEquipos(imeis: string[], tecnico: string, categoria: string) {
+async function abrirEquipos(libro: string, imeis: string[], tecnico: string, categoria: string) {
   if (!tecnico) throw new Error("Falta elegir el técnico.");
   if (!categoria) throw new Error("Falta elegir la categoría.");
 
-  const libro = await rutaLibro();
   const { cabecera, ultimaFila, ultimaColumna } = await cabeceraEntregas(libro);
   const col = (n: string) => indiceObligatorio(cabecera, n, HOJA_ENTREGAS);
   const iFecha = col("FECHA"), iHora = col("HORA"), iImei = col("IMEI");
@@ -600,8 +635,7 @@ async function escribirFilasNuevas(
   await escribirRango(libro, hoja, `A${filaInicio}:${letraColumna(ancho)}${filaFin}`, valores, formatos);
 }
 
-async function cerrarEquipos(items: ItemCierre[]) {
-  const libro = await rutaLibro();
+async function cerrarEquipos(libro: string, items: ItemCierre[]) {
   const { filaCabecera, cabecera, ultimaFila } = await cabeceraEntregas(libro);
   const col = (n: string) => indiceObligatorio(cabecera, n, HOJA_ENTREGAS);
   const iImei = col("IMEI"), iEstado = col("ESTADO"), iFechaC = col("FECHA C."), iHoraC = col("HORA C.");
@@ -619,6 +653,8 @@ async function cerrarEquipos(items: ItemCierre[]) {
   const yaCerradas = new Set<number>();
   const usadas = [iEstado, iFechaC, iHoraC, iMensaje, iDestino].filter((i) => i !== -1);
   const colMin = Math.min(...usadas), colMax = Math.max(...usadas);
+  const ancho = colMax - colMin + 1;
+  const cambios = new Map<number, Celda[]>(); // fila de Excel -> valores (colMin..colMax)
 
   for (const item of items) {
     // De abajo hacia arriba: la fila ABIERTO más reciente con ese IMEI.
@@ -632,29 +668,47 @@ async function cerrarEquipos(items: ItemCierre[]) {
       continue;
     }
     yaCerradas.add(r);
-    const fila = filaCabecera + 1 + r;
-    // Un PATCH por fila, del primer al último campo que se toca; lo del
-    // medio va en null (no se modifica).
-    const valores: Celda[] = new Array(colMax - colMin + 1).fill(null);
-    const formatos: (string | null)[] = new Array(colMax - colMin + 1).fill(null);
-    const poner = (i: number, valor: Celda, formato?: string) => {
-      valores[i - colMin] = valor;
-      if (formato) formatos[i - colMin] = formato;
-    };
+    const valores: Celda[] = new Array(ancho).fill(null);
+    const poner = (i: number, valor: Celda) => (valores[i - colMin] = valor);
     poner(iEstado, "CERRADO");
-    poner(iFechaC, Math.floor(ahora), "dd/mm/yyyy");
-    poner(iHoraC, ahora - Math.floor(ahora), "HH:mm");
+    poner(iFechaC, Math.floor(ahora));
+    poner(iHoraC, ahora - Math.floor(ahora));
     if (iMensaje !== -1 && item.mensaje) poner(iMensaje, item.mensaje);
     if (iDestino !== -1 && item.destino) poner(iDestino, item.destino.toUpperCase());
-    // Una escritura a la vez: Excel en línea rechaza escrituras simultáneas al mismo archivo.
-    await escribirRango(
-      libro, HOJA_ENTREGAS, `${letraColumna(colMin + 1)}${fila}:${letraColumna(colMax + 1)}${fila}`,
-      [valores], [formatos],
-    );
+    cambios.set(filaCabecera + 1 + r, valores);
 
     cerrados.push(item.imei);
     // Si no se eligió quién reparó, se asume el técnico que tenía el equipo.
     if (item.reparacion) reparaciones.push({ item, tecnico: item.tecnicoReparacion || texto(colTecnico[r]) });
+  }
+
+  // En vez de escribir fila por fila, se agrupan las filas cercanas en
+  // bloques y cada bloque va en una sola escritura: las filas del medio
+  // que no se tocan van en null (Graph las deja como están). Las columnas
+  // FECHA C./HORA C. del bloque reciben su formato (es el de toda la columna).
+  const filas = [...cambios.keys()].sort((a, b) => a - b);
+  const bloques: number[][] = [];
+  for (const f of filas) {
+    const actual = bloques[bloques.length - 1];
+    if (actual && f - actual[0] < 500) actual.push(f);
+    else bloques.push([f]);
+  }
+  for (const bloque of bloques) {
+    const desde = bloque[0], hasta = bloque[bloque.length - 1];
+    const valores: Celda[][] = [];
+    const formatos: (string | null)[][] = [];
+    for (let f = desde; f <= hasta; f++) {
+      valores.push(cambios.get(f) || new Array(ancho).fill(null));
+      const formato: (string | null)[] = new Array(ancho).fill(null);
+      formato[iFechaC - colMin] = "dd/mm/yyyy";
+      formato[iHoraC - colMin] = "HH:mm";
+      formatos.push(formato);
+    }
+    // Una escritura a la vez: Excel en línea rechaza escrituras simultáneas al mismo archivo.
+    await escribirRango(
+      libro, HOJA_ENTREGAS, `${letraColumna(colMin + 1)}${desde}:${letraColumna(colMax + 1)}${hasta}`,
+      valores, formatos,
+    );
   }
 
   if (reparaciones.length) await anotarReparaciones(libro, reparaciones);
