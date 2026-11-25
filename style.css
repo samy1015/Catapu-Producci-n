@@ -328,6 +328,49 @@ input[type="date"]:focus, select:focus, .search-box:focus {
 }
 
 /* ============================================
+   SUBPESTAÑAS (Producción: Resumen / Equipos por técnico)
+   ============================================ */
+.subpestanas {
+  display: flex;
+  gap: 4px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--line);
+}
+
+.subpestana {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* la línea activa tapa el borde de .subpestanas */
+  padding: 12px 14px 10px;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.subpestana:hover {
+  color: var(--text);
+}
+
+.subpestana.is-activa {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.subpestana:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* .control y .subpanel tienen display propio: sin esto, [hidden] no los ocultaría. */
+.control[hidden],
+.subpanel[hidden] {
+  display: none;
+}
+
+/* ============================================
    FRANJA DE MÉTRICAS (HERO)
    ============================================ */
 main {
@@ -370,12 +413,213 @@ main {
 /* ============================================
    GRID PRINCIPAL
    ============================================ */
-.grid-main {
+/* Resumen de Producción: a la izquierda las barras (arriba, a lo ancho)
+   y los dos rankings; a la derecha "Equipos encajados" y la tabla de
+   modelos, que ocupa toda la altura restante. */
+.resumen-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.6fr;
+  grid-template-columns: 1fr 1fr 0.95fr;
+  grid-template-areas:
+    "barras  barras   encajados"
+    "bateria chequeo  modelos";
   gap: 20px;
-  align-items: start;
   margin-bottom: 20px;
+}
+
+.resumen-grid > .panel {
+  margin: 0;
+  border-radius: 16px;
+  padding: 22px 26px;
+}
+
+.resumen-barras          { grid-area: barras; }
+.resumen-encajados       { grid-area: encajados; }
+.resumen-ranking-bateria { grid-area: bateria; }
+.resumen-ranking-chequeo { grid-area: chequeo; }
+.resumen-modelos         { grid-area: modelos; display: flex; flex-direction: column; }
+
+/* --- Barras verticales (chequeados por técnico) --- */
+.resumen-barras {
+  display: flex;
+  align-items: center;
+}
+
+.barras-verticales {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+  /* Solo en pantallas angostas hace falta deslizar; el espacio de abajo
+     evita que la barra de desplazamiento (que en Mac flota encima del
+     contenido) tape los nombres. */
+  overflow-x: auto;
+  padding-bottom: 16px;
+}
+
+.barra-vertical {
+  flex: 1 1 0;
+  min-width: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.barra-vertical-zona {
+  height: 240px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Cantidad arriba y % debajo: ocupa menos ancho que en una sola línea. */
+.barra-vertical-dato {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 11.5px;
+  line-height: 1.25;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+
+.barra-vertical-dato strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.barra-vertical-fill {
+  display: block;
+  width: 78%;
+  max-width: 80px;
+  border-radius: 6px 6px 0 0;
+}
+
+/* El nombre puede pasar a 2 líneas ("ALEXANDER / B.") en vez de cortarse. */
+.barra-vertical-nombre {
+  margin-top: 10px;
+  min-height: 2.6em;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* --- Equipos encajados (cifra grande, sin tarjeta) --- */
+.resumen-encajados {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.resumen-encajados-titulo {
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.resumen-encajados-numero {
+  font-family: var(--font-display);
+  font-size: 72px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.resumen-encajados-detalle {
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 14px;
+}
+
+/* --- Rankings con total a la derecha del título --- */
+.resumen-panel-encabezado {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.resumen-panel-encabezado .panel-title {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 18px;
+}
+
+.resumen-panel-total {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.resumen-grid .ranking {
+  gap: 16px;
+}
+
+.resumen-grid .ranking-row {
+  grid-template-columns: 150px 1fr 40px;
+  gap: 16px;
+}
+
+.resumen-grid .ranking-name,
+.resumen-grid .ranking-value {
+  font-size: 14px;
+}
+
+.resumen-grid .ranking-value {
+  color: var(--text);
+}
+
+/* --- Encajados por modelo --- */
+.resumen-modelos .panel-title {
+  font-size: 18px;
+}
+
+.tabla-modelos th {
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.tabla-modelos td {
+  font-size: 13.5px;
+  padding: 11px 8px;
+}
+
+.tabla-modelos th.num,
+.tabla-modelos td.num {
+  text-align: right;
+}
+
+.tabla-modelos td.num {
+  font-weight: 700;
+}
+
+.resumen-modelos-pie {
+  margin-top: auto; /* queda pegado abajo de la tarjeta */
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 13px;
+}
+
+.resumen-modelos-pie:empty,
+.resumen-modelos-pie:has(span:empty + span:empty) {
+  display: none;
 }
 
 .panel {
@@ -550,8 +794,13 @@ main {
     flex-direction: row;
     flex-wrap: wrap;
   }
-  .grid-main {
-    grid-template-columns: 1fr;
+  .resumen-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "encajados encajados"
+      "barras    barras"
+      "bateria   chequeo"
+      "modelos   modelos";
   }
   .hero-strip {
     grid-template-columns: repeat(2, 1fr);
@@ -567,6 +816,26 @@ main {
   main {
     padding: 16px 16px 40px;
   }
+  .subpestanas {
+    padding: 0 16px;
+  }
+
+  .resumen-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas: "encajados" "barras" "bateria" "chequeo" "modelos";
+  }
+  .resumen-grid > .panel {
+    padding: 16px 16px;
+  }
+  .resumen-barras {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+  .resumen-encajados-titulo { font-size: 28px; }
+  .resumen-encajados-numero { font-size: 56px; }
+  .barra-vertical-zona { height: 180px; }
+  .resumen-grid .ranking-row { grid-template-columns: 110px 1fr 36px; gap: 10px; }
   .status-line {
     margin: 10px 16px 0;
   }

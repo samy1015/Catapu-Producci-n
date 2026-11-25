@@ -92,15 +92,15 @@
             <span class="control-label">Buscar IMEI</span>
             <input type="search" id="buscador-imei" placeholder="Buscar por IMEI…" class="search-box" inputmode="numeric" />
           </label>
-          <label class="control">
+          <label class="control solo-resumen">
             <span class="control-label">Desde</span>
             <input type="date" id="fecha-desde" />
           </label>
-          <label class="control">
+          <label class="control solo-resumen">
             <span class="control-label">Hasta</span>
             <input type="date" id="fecha-hasta" />
           </label>
-          <label class="control">
+          <label class="control solo-resumen">
             <span class="control-label">Lote</span>
             <select id="filtro-lote">
               <option value="">Todos</option>
@@ -112,14 +112,18 @@
         </div>
       </header>
 
-      <p class="status-line" id="status-line">Cargando datos…</p>
-      <p class="status-line" id="rango-fechas"></p>
+      <p class="status-line is-error" id="status-line" hidden></p>
       <p class="status-line is-error" id="aviso-rango" role="alert" hidden>
         La fecha "Desde" es posterior a "Hasta". Corrige el rango para ver resultados.
       </p>
-      <p class="status-line" id="nota-filtros">
-        El rango de fechas se aplica por separado a cada actividad: pulido, cambio de batería y chequeo usan su propia columna de fecha.
-      </p>
+
+      <!-- Subpestañas de Producción (ver mostrarSubpestanaProduccion en script.js) -->
+      <nav class="subpestanas" role="tablist" aria-label="Secciones de Producción">
+        <button type="button" class="subpestana is-activa" role="tab" aria-selected="true"
+                aria-controls="prod-sub-resumen" data-subpestana="resumen">Resumen</button>
+        <button type="button" class="subpestana" role="tab" aria-selected="false"
+                aria-controls="prod-sub-equipos" data-subpestana="equipos">Equipos por técnico</button>
+      </nav>
 
       <main>
 
@@ -129,48 +133,60 @@
           <div id="resultado-imei"></div>
         </section>
 
-        <!-- Franja de métricas grandes -->
-        <section class="hero-strip" id="hero-strip" aria-label="Resumen general">
-          <div class="hero-stat">
-            <span class="hero-number" id="stat-total">—</span>
-            <span class="hero-label">Total de equipos trabajados</span>
-          </div>
-          <div class="hero-stat hero-stat--good">
-            <span class="hero-number" id="stat-baterias">—</span>
-            <span class="hero-label">Baterías cambiadas</span>
-          </div>
-          <div class="hero-stat hero-stat--warn">
-            <span class="hero-number" id="stat-chequeos">—</span>
-            <span class="hero-label">Chequeos</span>
-          </div>
-          <div class="hero-stat hero-stat--accent">
-            <span class="hero-number" id="stat-pulidos">—</span>
-            <span class="hero-label">Equipos pulidos</span>
-          </div>
-        </section>
+        <div class="subpanel" id="prod-sub-resumen" role="tabpanel">
 
-        <!-- Rankings + tablas -->
-        <section class="grid-main">
-          <div class="panel">
-            <h2 class="panel-title">Cambios de batería por técnico</h2>
+        <!-- Todo el Resumen se arma con los equipos CHEQUEADOS en el rango
+             (más el ranking de cambios de batería). Ver aplicarFiltrosYRenderizar. -->
+        <section class="resumen-grid" aria-label="Resumen de producción">
+
+          <!-- Chequeados por técnico: barras verticales -->
+          <div class="panel resumen-barras">
+            <div class="barras-verticales" id="barras-chequeo" role="list"
+                 aria-label="Equipos chequeados por técnico"></div>
+          </div>
+
+          <!-- Equipos encajados (= chequeados) -->
+          <div class="resumen-encajados">
+            <h2 class="resumen-encajados-titulo">Equipos encajados</h2>
+            <span class="resumen-encajados-numero" id="stat-encajados">—</span>
+            <span class="resumen-encajados-detalle" id="resumen-detalle-filtros"></span>
+          </div>
+
+          <div class="panel resumen-ranking-bateria">
+            <div class="resumen-panel-encabezado">
+              <h2 class="panel-title">Cambios de batería</h2>
+              <span class="resumen-panel-total" id="stat-baterias">—</span>
+            </div>
             <div class="ranking" id="ranking-bateria"></div>
           </div>
 
-          <div class="panel">
-            <h2 class="panel-title">Chequeos por técnico</h2>
+          <div class="panel resumen-ranking-chequeo">
+            <div class="resumen-panel-encabezado">
+              <h2 class="panel-title">Equipos chequeados</h2>
+              <span class="resumen-panel-total" id="stat-chequeos-ranking">—</span>
+            </div>
             <div class="ranking" id="ranking-chequeo"></div>
           </div>
 
-          <div class="panel">
-            <h2 class="panel-title">Modelos</h2>
-            <table class="data-table" id="tabla-modelos">
+          <div class="panel resumen-modelos">
+            <h2 class="panel-title">Encajados por modelo</h2>
+            <table class="data-table tabla-modelos" id="tabla-modelos">
               <thead>
-                <tr><th>Modelo</th><th>Capacidad</th><th>Cantidad</th></tr>
+                <tr><th>Modelo</th><th>Cap.</th><th class="num">Cant.</th></tr>
               </thead>
               <tbody></tbody>
             </table>
+            <div class="resumen-modelos-pie">
+              <span id="modelos-cantidad"></span>
+              <span id="modelos-total"></span>
+            </div>
           </div>
+
         </section>
+
+        </div><!-- /prod-sub-resumen -->
+
+        <div class="subpanel" id="prod-sub-equipos" role="tabpanel" hidden>
 
         <section class="panel panel-wide" id="panel-escaneo">
           <h2 class="panel-title">Registrar equipos (escaneo)</h2>
@@ -260,6 +276,8 @@
             <tbody></tbody>
           </table>
         </section>
+
+        </div><!-- /prod-sub-equipos -->
 
       </main>
 

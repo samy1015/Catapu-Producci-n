@@ -42,7 +42,6 @@ let esPrimeraCarga = true; // solo queremos fijar "último día" al abrir la pá
 // de buscar el elemento cada vez que lo necesitamos.
 const el = {
   statusLine: document.getElementById("status-line"),
-  rangoFechas: document.getElementById("rango-fechas"),
   avisoRango: document.getElementById("aviso-rango"),
   fechaDesde: document.getElementById("fecha-desde"),
   fechaHasta: document.getElementById("fecha-hasta"),
@@ -52,10 +51,13 @@ const el = {
   panelBusquedaImei: document.getElementById("panel-busqueda-imei"),
   resultadoImei: document.getElementById("resultado-imei"),
 
-  statTotal: document.getElementById("stat-total"),
+  statEncajados: document.getElementById("stat-encajados"),
   statBaterias: document.getElementById("stat-baterias"),
-  statChequeos: document.getElementById("stat-chequeos"),
-  statPulidos: document.getElementById("stat-pulidos"),
+  statChequeosRanking: document.getElementById("stat-chequeos-ranking"),
+  barrasChequeo: document.getElementById("barras-chequeo"),
+  resumenDetalleFiltros: document.getElementById("resumen-detalle-filtros"),
+  modelosCantidad: document.getElementById("modelos-cantidad"),
+  modelosTotal: document.getElementById("modelos-total"),
 
   rankingBateria: document.getElementById("ranking-bateria"),
   rankingChequeo: document.getElementById("ranking-chequeo"),
@@ -221,8 +223,9 @@ async function cargarDatos() {
   if (cargando) return; // ignora clics repetidos mientras hay una carga en curso
   cargando = true;
   el.btnRefrescar.classList.add("is-loading");
-  el.statusLine.textContent = "Cargando datos…";
-  el.statusLine.classList.remove("is-error");
+  // La línea de estado solo aparece si hay un error (mientras carga,
+  // el ícono del botón "Actualizar" ya gira).
+  el.statusLine.hidden = true;
 
   try {
     const inicio = performance.now();
@@ -241,7 +244,6 @@ async function cargarDatos() {
 
     poblarSelectorDeLotes(registrosOriginales);
     mostrarRangoDeFechasDisponible(registrosOriginales);
-    el.statusLine.textContent = `${registrosOriginales.length} registros cargados.`;
 
     const ahora = new Date();
     el.ultimaActualizacion.textContent =
@@ -253,7 +255,7 @@ async function cargarDatos() {
     el.statusLine.textContent =
       "No se pudieron cargar los datos. (" +
       error.message + ")";
-    el.statusLine.classList.add("is-error");
+    el.statusLine.hidden = false;
   } finally {
     cargando = false;
     el.btnRefrescar.classList.remove("is-loading");
@@ -318,7 +320,6 @@ function normalizarRegistro(fila) {
     capacidad: fila["CAPACIDAD"] || "",
     color: normalizarNombre(fila["COLOR"]) || "SIN COLOR",
     grado: (fila["GRADO"] || "").trim(),
-    pulido: (fila["PULIDO"] || "").trim().toUpperCase(),
     tecnicoBateria: normalizarNombre(fila["BATERIA"]),
     tecnicoChequeo: normalizarNombre(fila["CHEQUEO"]),
     lote: (fila["LOTE"] || "Sin lote").trim() || "Sin lote",
@@ -345,19 +346,15 @@ function construirMapaImei(registros) {
   return mapa;
 }
 
-// Le muestra al usuario qué rango de fechas existe realmente en los
-// datos cargados, y limita los selectores de fecha a ese rango para
-// que no elija fechas donde no hay ningún registro.
+// Limita los selectores de fecha al rango que existe realmente en los
+// datos cargados, para que no se elijan fechas sin ningún registro.
 function mostrarRangoDeFechasDisponible(registros) {
   const fechasValidas = registros
     .flatMap((r) => [r.fechaPulido, r.fechaBateria, r.fechaChequeo])
     .filter(Boolean)
     .sort(); // "AAAA-MM-DD" ordena bien como texto
 
-  if (fechasValidas.length === 0) {
-    el.rangoFechas.textContent = "No se encontraron fechas válidas en las columnas de pulido, batería o chequeo.";
-    return;
-  }
+  if (fechasValidas.length === 0) return;
 
   const minClave = fechasValidas[0];
   const maxClave = fechasValidas[fechasValidas.length - 1];
@@ -385,17 +382,6 @@ function mostrarRangoDeFechasDisponible(registros) {
     el.fechaHasta.value = claveInicial;
     esPrimeraCarga = false;
   }
-
-  el.rangoFechas.textContent =
-    `Actividad registrada del ${formatearClaveFecha(minClave)} ` +
-    `al ${formatearClaveFecha(maxClave)} ` +
-    `(considerando pulido, cambio de batería y chequeo).`;
-}
-
-// "2026-09-18" -> "18/09/2026"
-function formatearClaveFecha(clave) {
-  const [anio, mes, dia] = clave.split("-");
-  return `${dia}/${mes}/${anio}`;
 }
 
 // "ABRIL 2026A" -> [4, 2026, "A"], para poder ordenar los lotes en
@@ -529,49 +515,68 @@ function agruparEntregasPorTecnico(registros) {
 function aplicarFiltrosYRenderizar() {
   const base = aplicarFiltrosComunes(registrosOriginales);
   const { desde, hasta } = obtenerRangosSeleccionados();
+  el.resumenDetalleFiltros.textContent = describirFiltros(desde, hasta, el.filtroLote.value);
 
   if (desde && hasta && desde > hasta) {
     el.avisoRango.hidden = false;
-    renderizarHero({ total: 0, baterias: 0, chequeos: 0, pulidos: 0 });
-    renderizarRanking(el.rankingBateria, []);
-    renderizarRanking(el.rankingChequeo, []);
-    renderizarTablaModelos([]);
+    renderizarResumen([], []);
     return;
   }
   el.avisoRango.hidden = true;
 
   // Cada actividad se mide con su propia columna de fecha.
-  const registrosPulido = base.filter(
-    (r) => r.pulido === "SI" && fechaDentroDeRango(r.fechaPulido, desde, hasta)
-  );
   const registrosBateria = base.filter(
     (r) => r.tecnicoBateria && fechaDentroDeRango(r.fechaBateria, desde, hasta)
   );
   const registrosChequeo = base.filter(
     (r) => r.tecnicoChequeo && fechaDentroDeRango(r.fechaChequeo, desde, hasta)
   );
+  renderizarResumen(registrosChequeo, registrosBateria);
+}
 
-  // Para "modelos" consideramos que un equipo "tuvo actividad en el
-  // rango" si CUALQUIERA de sus tres fechas cae dentro de lo
-  // seleccionado. Si no hay rango elegido, devuelve todos (base).
-  const registrosConActividad = base.filter(
-    (r) =>
-      fechaDentroDeRango(r.fechaPulido, desde, hasta) ||
-      fechaDentroDeRango(r.fechaBateria, desde, hasta) ||
-      fechaDentroDeRango(r.fechaChequeo, desde, hasta)
-  );
+// Todo el Resumen sale de los equipos CHEQUEADOS (un equipo chequeado
+// queda listo para encajar), salvo el ranking de cambios de batería.
+function renderizarResumen(registrosChequeo, registrosBateria) {
+  const porTecnicoChequeo = contarPorCampo(registrosChequeo, "tecnicoChequeo");
+  const modelos = contarModelos(registrosChequeo);
 
-  renderizarHero({
-    total: registrosConActividad.length,
-    baterias: registrosBateria.length,
-    chequeos: registrosChequeo.length,
-    pulidos: registrosPulido.length,
-  });
+  el.statEncajados.textContent = registrosChequeo.length;
+  el.statChequeosRanking.textContent = registrosChequeo.length;
+  el.statBaterias.textContent = registrosBateria.length;
 
+  renderizarBarrasVerticales(el.barrasChequeo, porTecnicoChequeo, registrosChequeo.length);
   renderizarRanking(el.rankingBateria, contarPorCampo(registrosBateria, "tecnicoBateria"));
-  renderizarRanking(el.rankingChequeo, contarPorCampo(registrosChequeo, "tecnicoChequeo"));
-  // Solo equipos que tuvieron chequeo en el rango (no cualquier actividad).
-  renderizarTablaModelos(contarModelos(registrosChequeo));
+  renderizarRanking(el.rankingChequeo, porTecnicoChequeo);
+  renderizarTablaModelos(modelos);
+  el.modelosCantidad.textContent = modelos.length ? `${modelos.length} modelo${modelos.length === 1 ? "" : "s"}` : "";
+  el.modelosTotal.textContent = modelos.length ? `Total ${registrosChequeo.length}` : "";
+}
+
+// "17 – 25 nov · todos los lotes" (debajo de "Equipos encajados").
+const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+function describirFiltros(desde, hasta, lote) {
+  const textoLote = lote ? `lote ${lote}` : "todos los lotes";
+  if (!desde && !hasta) return `todas las fechas · ${textoLote}`;
+
+  const anioActual = new Date().getFullYear();
+  const partes = (clave) => {
+    const [a, m, d] = clave.split("-").map(Number);
+    return { a, m, d };
+  };
+  const fecha = ({ a, m, d }, conMes = true) =>
+    `${d}${conMes ? " " + MESES_CORTOS[m - 1] : ""}${conMes && a !== anioActual ? " " + a : ""}`;
+
+  let rango;
+  if (desde && hasta) {
+    const i = partes(desde), f = partes(hasta);
+    if (desde === hasta) rango = fecha(i);
+    else if (i.a === f.a && i.m === f.m) rango = `${i.d} – ${fecha(f)}`;
+    else rango = `${fecha(i)} – ${fecha(f)}`;
+  } else {
+    rango = desde ? `desde ${fecha(partes(desde))}` : `hasta ${fecha(partes(hasta))}`;
+  }
+  return `${rango} · ${textoLote}`;
 }
 
 // "Equipos por técnico" es una pestaña aparte ("EQUI. POR TEC.",
@@ -612,11 +617,32 @@ function mostrarUltimaFechaEntregas(registros) {
   el.entregasFechaHasta.value = ultima;
 }
 
-function renderizarHero({ total, baterias, chequeos, pulidos }) {
-  el.statTotal.textContent = total;
-  el.statBaterias.textContent = baterias;
-  el.statChequeos.textContent = chequeos;
-  el.statPulidos.textContent = pulidos;
+// Barras verticales (una por técnico), con cantidad y % sobre cada una.
+// Cada barra tiene su color; el nombre va debajo, así que el color nunca
+// es lo único que la identifica.
+const COLORES_BARRAS = ["#f58b47", "#4fce7f", "#f8c05a", "#5ec2f1", "#b18cf0", "#ef6491", "#8fa1a6"];
+
+function renderizarBarrasVerticales(contenedor, entradas, total) {
+  if (entradas.length === 0) {
+    contenedor.innerHTML = '<p class="ranking-empty">Sin datos en este rango.</p>';
+    return;
+  }
+  const maximo = entradas[0][1];
+  contenedor.innerHTML = entradas
+    .map(([nombre, cantidad], i) => {
+      const alto = Math.max(2, Math.round((cantidad / maximo) * 85)); // 85%: deja lugar para el dato de arriba
+      const porcentaje = total ? ((cantidad / total) * 100).toFixed(1) : "0";
+      const color = COLORES_BARRAS[i % COLORES_BARRAS.length];
+      return `
+        <div class="barra-vertical" role="listitem" title="${escaparHtml(nombre)}: ${cantidad} (${porcentaje}%)">
+          <div class="barra-vertical-zona">
+            <span class="barra-vertical-dato"><strong>${cantidad}</strong><span>${porcentaje}%</span></span>
+            <span class="barra-vertical-fill" style="height:${alto}%;background:${color}"></span>
+          </div>
+          <span class="barra-vertical-nombre">${escaparHtml(nombre)}</span>
+        </div>`;
+    })
+    .join("");
 }
 
 function renderizarRanking(contenedor, entradas) {
@@ -660,10 +686,10 @@ function renderizarTablaModelos(filas) {
         .map(([color, n]) => `<li><span>${escaparHtml(color)}</span> <strong>${n}</strong></li>`)
         .join("");
       return `
-      <tr class="fila-modelo" tabindex="0" role="button" aria-expanded="false" aria-controls="colores-${i}">
+      <tr class="fila-modelo" tabindex="0" role="button" aria-expanded="false" aria-controls="colores-${i}" title="Ver colores">
         <td><span class="chevron" aria-hidden="true">▸</span>${escaparHtml(f.modelo || "(Sin modelo)")}</td>
         <td>${escaparHtml(f.capacidad)}</td>
-        <td>${f.cantidad}</td>
+        <td class="num">${f.cantidad}</td>
       </tr>
       <tr class="fila-colores" id="colores-${i}" hidden>
         <td colspan="3"><ul class="lista-colores">${colores}</ul></td>
@@ -1272,6 +1298,43 @@ el.btnRefrescar.addEventListener("click", () => {
   cargarDatos();
   cargarEntregas();
 });
+
+// Subpestañas de Producción: "Resumen" (métricas, rankings, modelos) y
+// "Equipos por técnico" (escaneo + lista). Desde/Hasta/Lote solo
+// filtran el Resumen, así que se ocultan en la otra. La última elegida
+// se recuerda en este navegador.
+const CLAVE_SUBPESTANA = "catapu-produccion-subpestana";
+
+function mostrarSubpestanaProduccion(nombre) {
+  document.querySelectorAll(".subpestana").forEach((boton) => {
+    const activa = boton.dataset.subpestana === nombre;
+    boton.classList.toggle("is-activa", activa);
+    boton.setAttribute("aria-selected", String(activa));
+  });
+  document.getElementById("prod-sub-resumen").hidden = nombre !== "resumen";
+  document.getElementById("prod-sub-equipos").hidden = nombre !== "equipos";
+  document.querySelectorAll("#vista-produccion .solo-resumen").forEach((control) => {
+    control.hidden = nombre !== "resumen";
+  });
+  // El aviso "Desde es posterior a Hasta" es del Resumen; al volver, se revalida.
+  if (nombre === "resumen") aplicarFiltrosYRenderizar();
+  else el.avisoRango.hidden = true;
+  try {
+    localStorage.setItem(CLAVE_SUBPESTANA, nombre);
+  } catch (error) {
+    // sin almacenamiento (modo privado, etc.): simplemente no se recuerda
+  }
+}
+
+document.querySelectorAll(".subpestana").forEach((boton) => {
+  boton.addEventListener("click", () => mostrarSubpestanaProduccion(boton.dataset.subpestana));
+});
+
+try {
+  if (localStorage.getItem(CLAVE_SUBPESTANA) === "equipos") mostrarSubpestanaProduccion("equipos");
+} catch (error) {
+  // ídem: se queda en "Resumen"
+}
 el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
 el.fechaHasta.addEventListener("change", aplicarFiltrosYRenderizar);
 el.entregasFechaDesde.addEventListener("change", renderizarEntregasFiltradas);
