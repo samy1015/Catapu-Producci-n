@@ -21,7 +21,7 @@ const historialImeiCache = new Map();
 // los datos a menos que el usuario le dé "Actualizar".
 let registrosOriginales = [];
 let registrosEntregas = []; // pestaña "EQUI. POR TEC." (ver cargarEntregas)
-let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de la pestaña "2026"), para enriquecer "Equipos por técnico"
+let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de las pestañas "2025"/"2026"), para enriquecer "Equipos por técnico"
 // "abierto" (por defecto, al entrar): solo ABIERTO, ignorando el rango
 // de fechas. "mostrar": todo (abierto + cerrado), respetando el rango.
 let modoEntregas = "abierto";
@@ -226,7 +226,7 @@ async function llamarExcel(parametros = {}, cuerpo = null) {
   }
 }
 
-// Pestaña "2026" de PRODUCCION.xlsx. Siempre trae lo último del Excel.
+// Pestañas "2025" y "2026" de PRODUCCION.xlsx. Siempre trae lo último del Excel.
 async function cargarDatos() {
   if (cargando) return; // ignora clics repetidos mientras hay una carga en curso
   cargando = true;
@@ -283,6 +283,8 @@ async function cargarEntregas() {
     registrosEntregas = datos.filas.map((fila) => normalizarEntrega(filaAObjeto(datos.columnas, fila)));
     mostrarUltimaFechaEntregas(registrosEntregas);
     renderizarEntregasFiltradas();
+    // "Equipos encajados" también usa esta pestaña (ver encajadosEnRango).
+    if (registrosOriginales.length) aplicarFiltrosYRenderizar();
   } catch (error) {
     console.error("No se pudieron cargar los equipos por técnico:", error);
     el.tablaEntregas.innerHTML =
@@ -302,7 +304,13 @@ function normalizarEntrega(fila) {
     // C." bajo el grupo "CERRADO") — vacío mientras sigue ABIERTO.
     fechaEntrega: fila["FECHA C."] || "",
     horaEntrega: fila["HORA C."] || "",
+    destino: normalizarDestino(fila["DESTINO"]),
   };
+}
+
+// "Encaje" / "ENCAJE" / "encaje " -> "ENCAJE" (sin tildes, para comparar).
+function normalizarDestino(valor) {
+  return String(valor || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
 }
 
 // El script envía las filas como listas cortas (sin repetir el nombre
@@ -349,7 +357,7 @@ function normalizarNombre(valor) {
 function construirMapaImei(registros) {
   const mapa = new Map();
   registros.forEach((r) => {
-    if (r.imei) mapa.set(r.imei, { modelo: r.modelo, capacidad: r.capacidad, color: r.color, grado: r.grado });
+    if (r.imei) mapa.set(r.imei, { modelo: r.modelo, capacidad: r.capacidad, color: r.color, grado: r.grado, lote: r.lote });
   });
   return mapa;
 }
@@ -557,7 +565,7 @@ function aplicarFiltrosYRenderizar() {
 
   if (desde && hasta && desde > hasta) {
     el.avisoRango.hidden = false;
-    renderizarResumen([], []);
+    renderizarResumen([], [], []);
     return;
   }
   el.avisoRango.hidden = true;
@@ -569,7 +577,45 @@ function aplicarFiltrosYRenderizar() {
   const registrosChequeo = base.filter(
     (r) => r.tecnicoChequeo && fechaDentroDeRango(r.fechaChequeo, desde, hasta)
   );
-  renderizarResumen(registrosChequeo, registrosBateria);
+  renderizarResumen(registrosChequeo, registrosBateria, encajadosEnRango(registrosChequeo, desde, hasta));
+}
+
+// "Equipos encajados" junta dos fuentes, cortadas en una fecha para no
+// contar nada dos veces:
+//   - hasta el 24/11/2026: equipos chequeados de las pestañas 2025/2026
+//     (antes no existía "EQUI. POR TEC.");
+//   - desde el 25/11/2026: equipos de "EQUI. POR TEC." CERRADOS con
+//     destino "Encaje", por su fecha de cierre (FECHA C.). Modelo,
+//     capacidad, color y lote se cruzan por IMEI con las pestañas de años.
+// Cada equipo queda como { tecnico, modelo, capacidad, color }.
+const INICIO_ENCAJES_EQUI = "2026-11-25";
+
+function encajadosEnRango(registrosChequeo, desde, hasta) {
+  const deHojas = registrosChequeo
+    .filter((r) => r.fechaChequeo < INICIO_ENCAJES_EQUI)
+    .map((r) => ({ tecnico: r.tecnicoChequeo, modelo: r.modelo, capacidad: r.capacidad, color: r.color }));
+
+  const deEqui = registrosEntregas
+    .filter(
+      (r) =>
+        r.destino === "ENCAJE" &&
+        r.estado === "CERRADO" &&
+        r.fechaEntrega >= INICIO_ENCAJES_EQUI &&
+        fechaDentroDeRango(r.fechaEntrega, desde, hasta)
+    )
+    .map((r) => {
+      const datos = mapaImeiTaller.get(r.imei) || {};
+      return {
+        tecnico: r.tecnico,
+        modelo: datos.modelo || "SIN MODELO",
+        capacidad: datos.capacidad || "",
+        color: datos.color || "SIN COLOR",
+        lote: datos.lote || "Sin lote",
+      };
+    })
+    .filter((r) => lotesSeleccionados.size === 0 || lotesSeleccionados.has(r.lote));
+
+  return deHojas.concat(deEqui);
 }
 
 // Todo el Resumen sale de los equipos CHEQUEADOS (un equipo chequeado
@@ -578,17 +624,17 @@ function aplicarFiltrosYRenderizar() {
 // muestra solo sus equipos ("Encajados por JACK G."). Clic en "Equipos
 // encajados" (arriba a la derecha) vuelve a la lista general.
 let tecnicoChequeoSeleccionado = null;
-let ultimosRegistrosChequeo = [];
+let ultimosEncajados = [];
 
-function renderizarResumen(registrosChequeo, registrosBateria) {
+function renderizarResumen(registrosChequeo, registrosBateria, encajados) {
   const porTecnicoChequeo = contarPorCampo(registrosChequeo, "tecnicoChequeo");
-  ultimosRegistrosChequeo = registrosChequeo;
+  ultimosEncajados = encajados;
   // Si al cambiar fechas/lote el técnico elegido ya no tiene equipos, se vuelve a la lista general.
   if (tecnicoChequeoSeleccionado && !porTecnicoChequeo.some(([n]) => n === tecnicoChequeoSeleccionado)) {
     tecnicoChequeoSeleccionado = null;
   }
 
-  el.statEncajados.textContent = registrosChequeo.length;
+  el.statEncajados.textContent = encajados.length;
   el.statChequeosRanking.textContent = registrosChequeo.length;
   el.statBaterias.textContent = registrosBateria.length;
 
@@ -601,8 +647,8 @@ function renderizarResumen(registrosChequeo, registrosBateria) {
 function renderizarModelosEncajados() {
   const tecnico = tecnicoChequeoSeleccionado;
   const registros = tecnico
-    ? ultimosRegistrosChequeo.filter((r) => r.tecnicoChequeo === tecnico)
-    : ultimosRegistrosChequeo;
+    ? ultimosEncajados.filter((r) => r.tecnico === tecnico)
+    : ultimosEncajados;
   const modelos = contarModelos(registros);
 
   el.tituloModelos.textContent = tecnico ? `Encajados por ${tecnico}` : "Encajados por modelo";
@@ -1017,7 +1063,7 @@ function aplicarEscaneoLocal(cuerpo, datos) {
       registrosEntregas.push({
         fecha, hora, imei, tecnico: normalizarNombre(cuerpo.tecnico),
         categoria: String(cuerpo.categoria).toUpperCase(), estado: "ABIERTO",
-        fechaEntrega: "", horaEntrega: "",
+        fechaEntrega: "", horaEntrega: "", destino: "",
       });
     });
   } else {
@@ -1025,13 +1071,18 @@ function aplicarEscaneoLocal(cuerpo, datos) {
       for (let i = registrosEntregas.length - 1; i >= 0; i--) {
         const r = registrosEntregas[i];
         if (r.imei === imei && r.estado === "ABIERTO") {
-          registrosEntregas[i] = { ...r, estado: "CERRADO", fechaEntrega: fecha, horaEntrega: hora };
+          const item = (cuerpo.imeis || []).find((o) => o.imei === imei) || {};
+          registrosEntregas[i] = {
+            ...r, estado: "CERRADO", fechaEntrega: fecha, horaEntrega: hora,
+            destino: item.destino ? normalizarDestino(item.destino) : r.destino,
+          };
           break;
         }
       }
     });
   }
   renderizarEntregasFiltradas();
+  if (registrosOriginales.length) aplicarFiltrosYRenderizar();
 }
 
 async function aceptarEscaneo() {

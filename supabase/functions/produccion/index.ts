@@ -14,7 +14,7 @@
 //
 // Rutas (GET salvo la última):
 //   ?accion=diagnostico      -> prueba la conexión: lista las pestañas
-//   (sin accion)             -> resumen de la pestaña "2026" para el panel
+//   (sin accion)             -> resumen de las pestañas "2025" y "2026" para el panel
 //   ?imei=XXXX               -> filas completas (pestañas "2026" y "2025") cuyo IMEI / imei 2 contiene XXXX
 //   ?entregas=1              -> pestaña "EQUI. POR TEC."
 //   ?accion=reparaciones[&desde=AAAA-MM-DD][&hasta=AAAA-MM-DD] -> pestaña "REPARADOS"
@@ -428,16 +428,53 @@ async function diagnostico() {
 }
 
 // ------------------------------------------------------------
-// Resumen (pestaña "2026")
+// Resumen (pestañas "2025" y "2026")
 // ------------------------------------------------------------
+// De la más antigua a la más nueva: si un IMEI se repite, la fila más
+// reciente queda al final. Si falta alguna pestaña, se omite.
+const HOJAS_RESUMEN = ["2025", "2026"];
+
 async function resumen() {
   const inicio = Date.now();
   const libro = await rutaLibro();
-  const { ultimaFila, ultimaColumna } = await tamanoUsado(libro, HOJA_TALLER);
-  const cabecera = (await leerRango(libro, HOJA_TALLER, `A1:${letraColumna(ultimaColumna)}1`))[0].map((c) => texto(c));
-  const indices = COLUMNAS_PANEL.map((n) => indiceObligatorio(cabecera, n, HOJA_TALLER));
-  const columnas = await leerColumnas(libro, HOJA_TALLER, indices, 2, ultimaFila);
-  const msLeer = Date.now() - inicio;
+  const porHoja = await Promise.all(
+    HOJAS_RESUMEN.map((hoja) =>
+      leerHojaProduccion(libro, hoja).catch((err) => {
+        if (String((err as Error).message).includes("No existe la pestaña")) return { filas: [] as string[][], faltan: [] as string[] };
+        throw err;
+      })
+    ),
+  );
+  const avisos = porHoja
+    .map((h, i) => (h.faltan.length ? `${HOJAS_RESUMEN[i]}: faltan ${h.faltan.join(", ")}` : ""))
+    .filter(Boolean);
+
+  return {
+    columnas: COLUMNAS_PANEL,
+    filas: porHoja.flatMap((h) => h.filas),
+    hojas: HOJAS_RESUMEN,
+    avisos,
+    generado: new Date().toISOString(),
+    ms: { total: Date.now() - inicio },
+  };
+}
+
+// Lee las columnas del panel de una pestaña. Si a una pestaña le falta
+// alguna columna (ej. batería en 2025), esa queda vacía; solo es error si
+// no tiene ninguna de las fechas.
+async function leerHojaProduccion(libro: string, hoja: string) {
+  const { ultimaFila, ultimaColumna } = await tamanoUsado(libro, hoja);
+  const igualar = (v: Celda) => normalizarCabecera(v).replace(/\s+/g, " ");
+  const cabecera = (await leerRango(libro, hoja, `A1:${letraColumna(ultimaColumna)}1`))[0].map(igualar);
+  const indices = COLUMNAS_PANEL.map((n) => cabecera.indexOf(n));
+  const faltan = COLUMNAS_PANEL.filter((_, j) => indices[j] === -1);
+  if (COLUMNAS_PANEL_FECHA.every((n) => faltan.includes(n))) {
+    throw new Error(`La pestaña "${hoja}" no tiene ninguna columna de fecha (${COLUMNAS_PANEL_FECHA.join(", ")}).`);
+  }
+
+  const presentes = indices.filter((i) => i !== -1);
+  const leidas = await leerColumnas(libro, hoja, presentes, 2, ultimaFila);
+  const columnas = indices.map((i) => (i === -1 ? [] : leidas[presentes.indexOf(i)]));
 
   const esFecha = COLUMNAS_PANEL.map((n) => COLUMNAS_PANEL_FECHA.includes(n));
   const filas: string[][] = [];
@@ -446,13 +483,7 @@ async function resumen() {
     const fila = columnas.map((col, j) => (esFecha[j] ? serialAFecha(col[r]) : texto(col[r])));
     if (fila.some((c) => c !== "")) filas.push(fila);
   }
-
-  return {
-    columnas: COLUMNAS_PANEL,
-    filas,
-    generado: new Date().toISOString(),
-    ms: { leer: msLeer, total: Date.now() - inicio },
-  };
+  return { filas, faltan };
 }
 
 // ------------------------------------------------------------
@@ -541,13 +572,19 @@ async function entregas() {
   const libro = await rutaLibro();
   const { filaCabecera, cabecera, ultimaFila } = await cabeceraEntregas(libro);
   const indices = ENTREGAS_COLUMNAS.map((n) => indiceObligatorio(cabecera, n, HOJA_ENTREGAS));
-  const columnas = await leerColumnas(libro, HOJA_ENTREGAS, indices, filaCabecera + 1, ultimaFila);
+  // DESTINO es opcional: sin esa columna, va vacío.
+  const iDestino = cabecera.indexOf("DESTINO");
+  const columnas = await leerColumnas(
+    libro, HOJA_ENTREGAS, iDestino === -1 ? indices : [...indices, iDestino], filaCabecera + 1, ultimaFila,
+  );
+  if (iDestino === -1) columnas.push([]);
+  const nombres = [...ENTREGAS_COLUMNAS, "DESTINO"];
 
   const filas: string[][] = [];
   const total = Math.max(0, ultimaFila - filaCabecera);
   for (let r = 0; r < total; r++) {
     const fila = columnas.map((col, j) => {
-      const nombre = ENTREGAS_COLUMNAS[j];
+      const nombre = nombres[j];
       const v = col[r];
       if (ENTREGAS_FECHA.includes(nombre)) return typeof v === "number" ? serialAFecha(v) : texto(v);
       if (ENTREGAS_HORA.includes(nombre)) return serialAHora(v);
@@ -556,7 +593,7 @@ async function entregas() {
     if (fila.some((c) => c !== "")) filas.push(fila);
   }
 
-  return { columnas: ENTREGAS_COLUMNAS, filas, generado: new Date().toISOString(), ms: { total: Date.now() - inicio } };
+  return { columnas: nombres, filas, generado: new Date().toISOString(), ms: { total: Date.now() - inicio } };
 }
 
 // ------------------------------------------------------------
