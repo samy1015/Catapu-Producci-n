@@ -1,9 +1,8 @@
 -- Tabla de tickets (Garantía y Servicio técnico) — Catapu
 -- Para un proyecto NUEVO: pega este archivo entero en Supabase >
 -- SQL Editor > New query > Run.
--- Si ya tenías la tabla creada de antes, usa las migraciones
--- tickets_migracion_v2/v3/v4.sql en vez de este (este CREATE TABLE no
--- toca nada si la tabla ya existe).
+-- Ya incluye todo lo de las antiguas migraciones v2–v6 (borradas;
+-- siguen en el historial de git).
 
 create extension if not exists pgcrypto; -- para gen_random_uuid()
 

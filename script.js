@@ -274,7 +274,19 @@ async function cargarDatos() {
 // carga y se avisa de errores por su cuenta, para que un problema acá
 // no tumbe el resto del panel (mismo criterio que otras secciones
 // secundarias del dashboard).
-async function cargarEntregas() {
+// silencioso: si falla (ej. un corte de internet durante el refresco
+// automático), se deja la tabla como estaba en vez de mostrar el error.
+let cargandoEntregas = false;
+let entregasPendiente = false;
+let ultimaCargaEntregas = 0;
+
+async function cargarEntregas({ silencioso = false } = {}) {
+  // Si ya hay una carga en curso, se hace otra al terminar (con lo último).
+  if (cargandoEntregas) {
+    entregasPendiente = true;
+    return;
+  }
+  cargandoEntregas = true;
   try {
     const datos = await llamarExcel({ entregas: "1" });
     if (!datos || !Array.isArray(datos.columnas) || !Array.isArray(datos.filas)) {
@@ -285,11 +297,64 @@ async function cargarEntregas() {
     renderizarEntregasFiltradas();
     // "Equipos encajados" también usa esta pestaña (ver encajadosEnRango).
     if (registrosOriginales.length) aplicarFiltrosYRenderizar();
+    ultimaCargaEntregas = Date.now();
   } catch (error) {
     console.error("No se pudieron cargar los equipos por técnico:", error);
-    el.tablaEntregas.innerHTML =
-      `<tr><td colspan="4" class="ranking-empty">No se pudo cargar (${escaparHtml(error.message)}).</td></tr>`;
+    if (!silencioso || registrosEntregas.length === 0) {
+      el.tablaEntregas.innerHTML =
+        `<tr><td colspan="4" class="ranking-empty">No se pudo cargar (${escaparHtml(error.message)}).</td></tr>`;
+    }
+  } finally {
+    cargandoEntregas = false;
+    if (entregasPendiente) {
+      entregasPendiente = false;
+      cargarEntregas({ silencioso: true });
+    }
   }
+}
+
+// ------------------------------------------------------------
+// "Equipos por técnico" EN VIVO
+// ------------------------------------------------------------
+// 1) Al instante: quien abre/cierra equipos desde el dashboard avisa a
+//    las demás pantallas abiertas (Supabase Realtime, canal "broadcast":
+//    no usa ninguna tabla). Cada pantalla aplica el cambio al toque y
+//    luego relee el Excel para confirmarlo.
+// 2) Cada 30 s (solo con la pestaña del navegador a la vista) se relee
+//    el Excel, para captar cambios hechos directamente en él.
+const SEGUNDOS_REFRESCO_ENTREGAS = 30;
+let canalEntregas = null;
+
+function iniciarEntregasEnVivo() {
+  if (canalEntregas) return;
+  canalEntregas = supabaseCliente
+    .channel("catapu-entregas")
+    .on("broadcast", { event: "cambio" }, ({ payload }) => {
+      try {
+        if (payload?.cuerpo && payload?.datos) aplicarEscaneoLocal(payload.cuerpo, payload.datos);
+      } catch (error) {
+        console.warn("Cambio en vivo no aplicado:", error);
+      }
+      // Un momento de margen para que el Excel ya tenga guardado el cambio.
+      setTimeout(() => cargarEntregas({ silencioso: true }), 2000);
+    })
+    .subscribe();
+
+  setInterval(() => {
+    if (!document.hidden) cargarEntregas({ silencioso: true });
+  }, SEGUNDOS_REFRESCO_ENTREGAS * 1000);
+
+  // Al volver a esta pestaña del navegador, si pasó un rato, se refresca ya.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Date.now() - ultimaCargaEntregas > 10_000) cargarEntregas({ silencioso: true });
+  });
+}
+
+function avisarCambioEntregas(cuerpo, datos) {
+  if (!canalEntregas) return;
+  canalEntregas
+    .send({ type: "broadcast", event: "cambio", payload: { cuerpo, datos } })
+    .catch((error) => console.warn("No se pudo avisar el cambio en vivo:", error));
 }
 
 function normalizarEntrega(fila) {
@@ -857,8 +922,15 @@ function renderizarTablaEntregas(filas) {
     return;
   }
 
+  // Los técnicos que estaban desplegados siguen desplegados después de
+  // redibujar (importante con el refresco automático).
+  const desplegados = new Set(
+    [...el.tablaEntregas.querySelectorAll('.fila-modelo[aria-expanded="true"]')].map((f) => f.dataset.tecnico)
+  );
+
   el.tablaEntregas.innerHTML = filas
     .map((f, i) => {
+      const abierto = desplegados.has(f.tecnico);
       const filasEquipo = f.equipos
         .map((e) => {
           const clase = e.estado === "ABIERTO" ? "badge-estado--warn" : "badge-estado--good";
@@ -889,13 +961,13 @@ function renderizarTablaEntregas(filas) {
           <tbody>${filasEquipo}</tbody>
         </table>`;
       return `
-      <tr class="fila-modelo" tabindex="0" role="button" aria-expanded="false" aria-controls="equipos-entrega-${i}">
+      <tr class="fila-modelo" tabindex="0" role="button" aria-expanded="${abierto}" aria-controls="equipos-entrega-${i}" data-tecnico="${escaparHtml(f.tecnico)}">
         <td><span class="chevron" aria-hidden="true">▸</span>${escaparHtml(f.tecnico)}</td>
         <td>${f.abiertos}</td>
         <td>${f.cerrados}</td>
         <td>${f.abiertos + f.cerrados}</td>
       </tr>
-      <tr class="fila-colores" id="equipos-entrega-${i}" hidden>
+      <tr class="fila-colores" id="equipos-entrega-${i}"${abierto ? "" : " hidden"}>
         <td colspan="4">${equipos}</td>
       </tr>`;
     })
@@ -1143,6 +1215,7 @@ async function aceptarEscaneo() {
     // La tabla se actualiza al toque con lo que se acaba de guardar, y
     // después se recarga de verdad desde el Excel (por detrás).
     aplicarEscaneoLocal(cuerpo, datos);
+    avisarCambioEntregas(cuerpo, datos);
     escaneoImeis = [];
     renderizarListaEscaneo();
     cargarEntregas();
@@ -1688,6 +1761,7 @@ const cargadoresDeVista = {
   produccion: () => {
     cargarDatos();
     cargarEntregas();
+    iniciarEntregasEnVivo();
   },
 };
 

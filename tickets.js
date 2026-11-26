@@ -505,7 +505,7 @@
   // ----------------------------------------------------------
   // Historial: eventos automáticos (creación, cambios de estado,
   // informe técnico) + comentarios manuales con fotos. Todo vive en la
-  // tabla "ticket_eventos" (ver supabase/tickets_migracion_v6.sql).
+  // tabla "ticket_eventos" (ver supabase/tickets.sql).
   // ----------------------------------------------------------
   async function cargarEventos(ticketId) {
     const { data, error } = await cliente
