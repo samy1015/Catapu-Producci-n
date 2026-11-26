@@ -49,7 +49,7 @@ const COLUMNAS_PANEL = [
 ];
 const COLUMNAS_PANEL_FECHA = ["FECHA DE PULIDO", "FECHA CAMBIO BATERIA", "FECHA DE CHEQUEO"];
 
-const ENTREGAS_COLUMNAS = ["FECHA", "HORA", "IMEI", "TECNICO", "CATEGORIA", "ESTADO", "FECHA C.", "HORA C."];
+const ENTREGAS_COLUMNAS = ["FECHA", "HORA", "IMEI", "TECNICO", "ESTADO", "FECHA C.", "HORA C."];
 const ENTREGAS_FECHA = ["FECHA", "FECHA C."];
 const ENTREGAS_HORA = ["HORA", "HORA C."];
 
@@ -350,9 +350,14 @@ function serialAFecha(v: Celda) {
     const d = new Date(EPOCA_EXCEL + Math.round(v * 86400000));
     return d.toISOString().slice(0, 10);
   }
-  // A veces la fecha está escrita como texto "d/m/aaaa".
+  // A veces la fecha está escrita como texto: "d/m/aaaa" (lo normal) o
+  // "m/d/aaaa" (formato de EE.UU.; se reconoce cuando el 2.º número pasa de 12).
   const m = String(v ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
+  if (!m) return "";
+  let [dia, mes] = [Number(m[1]), Number(m[2])];
+  if (mes > 12 && dia <= 12) [dia, mes] = [mes, dia];
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return "";
+  return `${m[3]}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
 }
 
 function serialAHora(v: Celda) {
@@ -586,7 +591,8 @@ async function entregas() {
     const fila = columnas.map((col, j) => {
       const nombre = nombres[j];
       const v = col[r];
-      if (ENTREGAS_FECHA.includes(nombre)) return typeof v === "number" ? serialAFecha(v) : texto(v);
+      // Hay fechas reales y otras escritas como texto ("20/11/2026"): ambas a "AAAA-MM-DD".
+      if (ENTREGAS_FECHA.includes(nombre)) return serialAFecha(v) || texto(v);
       if (ENTREGAS_HORA.includes(nombre)) return serialAHora(v);
       return texto(v);
     });
@@ -639,7 +645,10 @@ async function abrirEquipos(libro: string, imeis: string[], tecnico: string, cat
   const { cabecera, ultimaFila, ultimaColumna } = await cabeceraEntregas(libro);
   const col = (n: string) => indiceObligatorio(cabecera, n, HOJA_ENTREGAS);
   const iFecha = col("FECHA"), iHora = col("HORA"), iImei = col("IMEI");
-  const iTecnico = col("TECNICO"), iCategoria = col("CATEGORIA"), iEstado = col("ESTADO");
+  const iTecnico = col("TECNICO"), iEstado = col("ESTADO");
+  // El origen elegido en el escaneo (Lote/Reparación/Garantia) va en la
+  // columna ORIGEN, si existe; si no, no se anota.
+  const iOrigen = cabecera.indexOf("ORIGEN");
 
   const ahora = ahoraSerial();
   const valores: Celda[][] = [];
@@ -651,7 +660,7 @@ async function abrirEquipos(libro: string, imeis: string[], tecnico: string, cat
     fila[iHora] = ahora - Math.floor(ahora); formato[iHora] = "HH:mm";
     fila[iImei] = imeiCelda(imei); formato[iImei] = "0";
     fila[iTecnico] = tecnico.toUpperCase();
-    fila[iCategoria] = categoria.toUpperCase();
+    if (iOrigen !== -1) fila[iOrigen] = categoria.toUpperCase();
     fila[iEstado] = "ABIERTO";
     valores.push(fila);
     formatos.push(formato);

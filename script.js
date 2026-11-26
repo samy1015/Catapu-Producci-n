@@ -298,7 +298,6 @@ function normalizarEntrega(fila) {
     hora: fila["HORA"] || "",
     imei: String(fila["IMEI"] || "").trim(),
     tecnico: normalizarNombre(fila["TECNICO"]),
-    categoria: String(fila["CATEGORIA"] || "").trim(),
     estado: String(fila["ESTADO"] || "").trim().toUpperCase(),
     // Cuándo el técnico entregó el equipo (columnas "FECHA C."/"HORA
     // C." bajo el grupo "CERRADO") — vacío mientras sigue ABIERTO.
@@ -872,7 +871,6 @@ function renderizarTablaEntregas(filas) {
               <td>${escaparHtml(e.capacidad || "—")}</td>
               <td>${escaparHtml(e.color || "—")}</td>
               <td>${escaparHtml(e.grado || "—")}</td>
-              <td>${escaparHtml(e.categoria || "—")}</td>
               <td><span class="badge-estado ${clase}">${escaparHtml(e.estado)}</span></td>
               <td>${escaparHtml(formatearFechaClave(e.fechaEntrega))}</td>
               <td>${escaparHtml(e.horaEntrega || "—")}</td>
@@ -884,7 +882,7 @@ function renderizarTablaEntregas(filas) {
           <thead>
             <tr>
               <th>Fecha</th><th>Hora</th><th>IMEI</th><th>Modelo</th><th>Capacidad</th>
-              <th>Color</th><th>Grado</th><th>Categoría</th><th>Estado</th>
+              <th>Color</th><th>Grado</th><th>Estado</th>
               <th>Fecha entrega</th><th>Hora entrega</th>
             </tr>
           </thead>
@@ -1062,7 +1060,7 @@ function aplicarEscaneoLocal(cuerpo, datos) {
     cuerpo.imeis.forEach((imei) => {
       registrosEntregas.push({
         fecha, hora, imei, tecnico: normalizarNombre(cuerpo.tecnico),
-        categoria: String(cuerpo.categoria).toUpperCase(), estado: "ABIERTO",
+        estado: "ABIERTO",
         fechaEntrega: "", horaEntrega: "", destino: "",
       });
     });
@@ -1512,13 +1510,15 @@ try {
 }
 el.fechaDesde.addEventListener("change", aplicarFiltrosYRenderizar);
 el.fechaHasta.addEventListener("change", aplicarFiltrosYRenderizar);
-el.entregasFechaDesde.addEventListener("change", renderizarEntregasFiltradas);
-el.entregasFechaHasta.addEventListener("change", renderizarEntregasFiltradas);
-el.entregasBtnMostrar.addEventListener("click", () => {
+// Al cambiar una fecha se pasa solo a "Mostrar" (abiertos y cerrados de ese rango).
+el.entregasFechaDesde.addEventListener("change", mostrarEntregasPorFecha);
+el.entregasFechaHasta.addEventListener("change", mostrarEntregasPorFecha);
+function mostrarEntregasPorFecha() {
   modoEntregas = "mostrar";
   actualizarBotonesModoEntregas();
   renderizarEntregasFiltradas();
-});
+}
+el.entregasBtnMostrar.addEventListener("click", mostrarEntregasPorFecha);
 el.entregasBtnAbierto.addEventListener("click", () => {
   modoEntregas = "abierto";
   actualizarBotonesModoEntregas();
