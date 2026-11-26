@@ -1208,7 +1208,7 @@ async function aceptarEscaneo() {
         ? ` No se encontró abierto: ${datos.noEncontrados.join(", ")}.`
         : "";
       const reparados = datos.reparados ? ` ${datos.reparados} reparación(es) anotada(s).` : "";
-      // Lote + Encaje: chequeo/batería anotados en la hoja 2026.
+      // Lote + Encaje: chequeo/batería anotados en la hoja 2026; mensajes sumados ahí también.
       const t = datos.taller;
       let taller = "";
       let problemaTaller = false;
@@ -1217,6 +1217,7 @@ async function aceptarEscaneo() {
         problemaTaller = true;
       } else if (t) {
         if (t.anotados.length) taller += ` ${t.anotados.length} chequeo(s) anotado(s) en 2026.`;
+        if (t.mensajes?.length) taller += ` ${t.mensajes.length} mensaje(s) agregado(s) en 2026.`;
         if (t.noEstan.length) taller += ` No están en la hoja 2026: ${t.noEstan.join(", ")}.`;
         if (t.sinPorcentaje.length) taller += ` Sin "% BATERIA" (batería no anotada): ${t.sinPorcentaje.join(", ")}.`;
         problemaTaller = t.noEstan.length > 0 || t.sinPorcentaje.length > 0;

@@ -694,8 +694,8 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
   const [colImei, colEstado, colTecnico, colOrigen = []] = await leerColumnas(
     libro, HOJA_ENTREGAS, [iImei, iEstado, iTecnico, ...(iOrigen === -1 ? [] : [iOrigen])], filaCabecera + 1, ultimaFila,
   );
-  // Equipos de LOTE que van a ENCAJE: además se anotan en la pestaña "2026".
-  const paraTaller: { imei: string; tecnico: string }[] = [];
+  // Lo que además se anota en la pestaña "2026" (ver anotarEnTaller).
+  const paraTaller: EquipoTaller[] = [];
 
   const ahora = ahoraSerial();
   const cerrados: string[] = [];
@@ -729,8 +729,13 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
     cambios.set(filaCabecera + 1 + r, valores);
 
     cerrados.push(item.imei);
-    if (sinTildes(texto(colOrigen[r])) === "LOTE" && sinTildes(item.destino) === "ENCAJE") {
-      paraTaller.push({ imei: item.imei, tecnico: texto(colTecnico[r]).toUpperCase() });
+    const esLoteEncaje = sinTildes(texto(colOrigen[r])) === "LOTE" && sinTildes(item.destino) === "ENCAJE";
+    if (esLoteEncaje || item.mensaje) {
+      paraTaller.push({
+        imei: item.imei,
+        tecnicoChequeo: esLoteEncaje ? texto(colTecnico[r]).toUpperCase() : "",
+        mensaje: item.mensaje,
+      });
     }
     // Si no se eligió quién reparó, se asume el técnico que tenía el equipo.
     if (item.reparacion) reparaciones.push({ item, tecnico: item.tecnicoReparacion || texto(colTecnico[r]) });
@@ -746,10 +751,10 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
 
   // Lo de "2026" va al final y aparte: si falla, el cierre ya quedó
   // guardado y solo se avisa.
-  let taller: Awaited<ReturnType<typeof anotarChequeosEnTaller>> | { error: string } | null = null;
+  let taller: Awaited<ReturnType<typeof anotarEnTaller>> | { error: string } | null = null;
   if (paraTaller.length) {
     try {
-      taller = await anotarChequeosEnTaller(libro, paraTaller);
+      taller = await anotarEnTaller(libro, paraTaller);
     } catch (err) {
       taller = { error: (err as Error).message };
     }
@@ -770,53 +775,75 @@ function porcentajeBateria(v: Celda): number | null {
   return n <= 1 ? n * 100 : n;
 }
 
-// Al cerrar un equipo de LOTE con destino ENCAJE, en su fila de "2026":
+// Al cerrar, en la fila del equipo en "2026":
+// - Si es de LOTE y va a ENCAJE (tecnicoChequeo no vacío):
 //   - FECHA DE CHEQUEO = hoy, CHEQUEO = técnico.
 //   - Batería según "% BATERIA":
 //       89% o menos -> FECHA CAMBIO BATERIA = hoy, BATERIA = técnico.
 //       90% o más   -> BATERIA = "PASA" (sin fecha).
 //       vacío       -> no se toca la batería (se avisa).
-async function anotarChequeosEnTaller(libro: string, equipos: { imei: string; tecnico: string }[]) {
-  const columnas = ["% BATERIA", "FECHA CAMBIO BATERIA", "BATERIA", "FECHA DE CHEQUEO", "CHEQUEO"];
-  const { indice, valores: leidos, filaPorImei } = await leerTallerPorImei(libro, columnas, ["% BATERIA"]);
-  const iFechaBat = indice["FECHA CAMBIO BATERIA"], iBateria = indice["BATERIA"];
-  const iFechaChq = indice["FECHA DE CHEQUEO"], iChequeo = indice["CHEQUEO"];
-  const usadas = [iFechaBat, iBateria, iFechaChq, iChequeo];
+// - Si trae mensaje (cualquier origen/destino): se SUMA al MENSAJE que ya
+//   tenga, sin pisarlo ("1" + "2" -> "1 - 2").
+type EquipoTaller = { imei: string; tecnicoChequeo: string; mensaje: string };
+const COLUMNAS_CHEQUEO_TALLER = ["% BATERIA", "FECHA CAMBIO BATERIA", "BATERIA", "FECHA DE CHEQUEO", "CHEQUEO"];
+
+async function anotarEnTaller(libro: string, equipos: EquipoTaller[]) {
+  const hayChequeos = equipos.some((e) => e.tecnicoChequeo);
+  const hayMensajes = equipos.some((e) => e.mensaje);
+  const columnas = [...(hayChequeos ? COLUMNAS_CHEQUEO_TALLER : []), ...(hayMensajes ? ["MENSAJE"] : [])];
+  const leer = [...(hayChequeos ? ["% BATERIA"] : []), ...(hayMensajes ? ["MENSAJE"] : [])];
+  const { indice, valores: leidos, filaPorImei } = await leerTallerPorImei(libro, columnas, leer);
+
+  const usadas = columnas.filter((n) => n !== "% BATERIA").map((n) => indice[n]);
   const colMin = Math.min(...usadas), ancho = Math.max(...usadas) - colMin + 1;
+  const poner = (fila: Celda[], columna: string, valor: Celda) => (fila[indice[columna] - colMin] = valor);
 
   const hoy = Math.floor(ahoraSerial());
   const cambios = new Map<number, Celda[]>();
   const anotados: string[] = [];
+  const mensajes: string[] = [];
   const noEstan: string[] = [];
   const sinPorcentaje: string[] = [];
 
-  for (const { imei, tecnico } of equipos) {
+  for (const { imei, tecnicoChequeo, mensaje } of equipos) {
     const r = filaPorImei.get(imei);
     if (r === undefined) {
       noEstan.push(imei);
       continue;
     }
-    const valores: Celda[] = new Array(ancho).fill(null);
-    valores[iFechaChq - colMin] = hoy;
-    valores[iChequeo - colMin] = tecnico;
-    const pct = porcentajeBateria(leidos["% BATERIA"][r]);
-    if (pct === null) sinPorcentaje.push(imei);
-    else if (pct >= 90) valores[iBateria - colMin] = "PASA";
-    else {
-      valores[iFechaBat - colMin] = hoy;
-      valores[iBateria - colMin] = tecnico;
+    // Si el mismo IMEI vino dos veces, se sigue sobre lo ya preparado.
+    const fila = cambios.get(r + 2) || new Array(ancho).fill(null);
+
+    if (tecnicoChequeo) {
+      poner(fila, "FECHA DE CHEQUEO", hoy);
+      poner(fila, "CHEQUEO", tecnicoChequeo);
+      const pct = porcentajeBateria(leidos["% BATERIA"][r]);
+      if (pct === null) sinPorcentaje.push(imei);
+      else if (pct >= 90) poner(fila, "BATERIA", "PASA");
+      else {
+        poner(fila, "FECHA CAMBIO BATERIA", hoy);
+        poner(fila, "BATERIA", tecnicoChequeo);
+      }
+      anotados.push(imei);
     }
-    cambios.set(r + 2, valores);
-    anotados.push(imei);
+
+    if (mensaje) {
+      const previo = texto(fila[indice["MENSAJE"] - colMin] ?? leidos["MENSAJE"][r]);
+      poner(fila, "MENSAJE", previo ? `${previo} - ${mensaje}` : mensaje);
+      mensajes.push(imei);
+    }
+    cambios.set(r + 2, fila);
   }
 
   if (cambios.size) {
-    await escribirFilasSueltas(libro, HOJA_TALLER, cambios, colMin, ancho, {
-      [iFechaBat - colMin]: "dd/mm/yyyy",
-      [iFechaChq - colMin]: "dd/mm/yyyy",
-    });
+    const formatos: Record<number, string> = {};
+    if (hayChequeos) {
+      formatos[indice["FECHA CAMBIO BATERIA"] - colMin] = "dd/mm/yyyy";
+      formatos[indice["FECHA DE CHEQUEO"] - colMin] = "dd/mm/yyyy";
+    }
+    await escribirFilasSueltas(libro, HOJA_TALLER, cambios, colMin, ancho, formatos);
   }
-  return { anotados, noEstan, sinPorcentaje };
+  return { anotados, mensajes, noEstan, sinPorcentaje };
 }
 
 // Escribe filas que no están juntas (fila de Excel -> valores desde
