@@ -980,7 +980,7 @@ function renderizarTablaEntregas(filas) {
 // mismo look de ".tk-fotos-seleccionadas" (lista con "✕" para quitar)
 // que ya usa Tickets para fotos elegidas.
 // ============================================================
-const ESCANEO_DESTINOS = ["Encaje", "Reparación", "Piezas", "Muerto"];
+const ESCANEO_DESTINOS = ["Encaje", "Reparación", "Pieza", "Muertos"];
 const ESCANEO_CATEGORIAS_REPARACION = ["Lote", "Reparación"];
 
 // Misma lista que el selector "Técnico" del modo Abrir (index.html).
@@ -1168,7 +1168,7 @@ async function aceptarEscaneo() {
     const tecnico = el.escaneoTecnico.value;
     const categoria = el.escaneoCategoria.value;
     if (!tecnico || !categoria) {
-      el.escaneoStatus.textContent = "Elige técnico y categoría antes de aceptar.";
+      el.escaneoStatus.textContent = "Elige técnico y origen antes de aceptar.";
       el.escaneoStatus.classList.add("is-error");
       return;
     }
@@ -1208,14 +1208,29 @@ async function aceptarEscaneo() {
         ? ` No se encontró abierto: ${datos.noEncontrados.join(", ")}.`
         : "";
       const reparados = datos.reparados ? ` ${datos.reparados} reparación(es) anotada(s).` : "";
-      el.escaneoStatus.textContent = `${datos.cerrados.length} cerrado(s).${reparados}${aviso}`;
-      if (datos.noEncontrados.length) el.escaneoStatus.classList.add("is-error");
+      // Lote + Encaje: chequeo/batería anotados en la hoja 2026.
+      const t = datos.taller;
+      let taller = "";
+      let problemaTaller = false;
+      if (t?.error) {
+        taller = ` No se pudo anotar en la hoja 2026 (${t.error}).`;
+        problemaTaller = true;
+      } else if (t) {
+        if (t.anotados.length) taller += ` ${t.anotados.length} chequeo(s) anotado(s) en 2026.`;
+        if (t.noEstan.length) taller += ` No están en la hoja 2026: ${t.noEstan.join(", ")}.`;
+        if (t.sinPorcentaje.length) taller += ` Sin "% BATERIA" (batería no anotada): ${t.sinPorcentaje.join(", ")}.`;
+        problemaTaller = t.noEstan.length > 0 || t.sinPorcentaje.length > 0;
+      }
+      el.escaneoStatus.textContent = `${datos.cerrados.length} cerrado(s).${reparados}${taller}${aviso}`;
+      if (datos.noEncontrados.length || problemaTaller) el.escaneoStatus.classList.add("is-error");
     }
 
     // La tabla se actualiza al toque con lo que se acaba de guardar, y
     // después se recarga de verdad desde el Excel (por detrás).
     aplicarEscaneoLocal(cuerpo, datos);
     avisarCambioEntregas(cuerpo, datos);
+    // Si se anotaron chequeos/baterías en 2026, el Resumen también cambia.
+    if (datos.taller?.anotados?.length) cargarDatos();
     escaneoImeis = [];
     renderizarListaEscaneo();
     cargarEntregas();

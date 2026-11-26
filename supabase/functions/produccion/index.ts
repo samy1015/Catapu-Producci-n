@@ -642,7 +642,7 @@ function imeiCelda(imei: string): Celda {
 
 async function abrirEquipos(libro: string, imeis: string[], tecnico: string, categoria: string) {
   if (!tecnico) throw new Error("Falta elegir el técnico.");
-  if (!categoria) throw new Error("Falta elegir la categoría.");
+  if (!categoria) throw new Error("Falta elegir el origen.");
 
   const { cabecera, ultimaFila, ultimaColumna } = await cabeceraEntregas(libro);
   const col = (n: string) => indiceObligatorio(cabecera, n, HOJA_ENTREGAS);
@@ -690,9 +690,12 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
   const iTecnico = col("TECNICO");
   const iMensaje = cabecera.indexOf("MENSAJE"), iDestino = cabecera.indexOf("DESTINO");
 
-  const [colImei, colEstado, colTecnico] = await leerColumnas(
-    libro, HOJA_ENTREGAS, [iImei, iEstado, iTecnico], filaCabecera + 1, ultimaFila,
+  const iOrigen = cabecera.indexOf("ORIGEN");
+  const [colImei, colEstado, colTecnico, colOrigen = []] = await leerColumnas(
+    libro, HOJA_ENTREGAS, [iImei, iEstado, iTecnico, ...(iOrigen === -1 ? [] : [iOrigen])], filaCabecera + 1, ultimaFila,
   );
+  // Equipos de LOTE que van a ENCAJE: además se anotan en la pestaña "2026".
+  const paraTaller: { imei: string; tecnico: string }[] = [];
 
   const ahora = ahoraSerial();
   const cerrados: string[] = [];
@@ -726,6 +729,9 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
     cambios.set(filaCabecera + 1 + r, valores);
 
     cerrados.push(item.imei);
+    if (sinTildes(texto(colOrigen[r])) === "LOTE" && sinTildes(item.destino) === "ENCAJE") {
+      paraTaller.push({ imei: item.imei, tecnico: texto(colTecnico[r]).toUpperCase() });
+    }
     // Si no se eligió quién reparó, se asume el técnico que tenía el equipo.
     if (item.reparacion) reparaciones.push({ item, tecnico: item.tecnicoReparacion || texto(colTecnico[r]) });
   }
@@ -737,7 +743,80 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
   });
 
   if (reparaciones.length) await anotarReparaciones(libro, reparaciones);
-  return { ok: true, cerrados, noEncontrados, reparados: reparaciones.length };
+
+  // Lo de "2026" va al final y aparte: si falla, el cierre ya quedó
+  // guardado y solo se avisa.
+  let taller: Awaited<ReturnType<typeof anotarChequeosEnTaller>> | { error: string } | null = null;
+  if (paraTaller.length) {
+    try {
+      taller = await anotarChequeosEnTaller(libro, paraTaller);
+    } catch (err) {
+      taller = { error: (err as Error).message };
+    }
+  }
+  return { ok: true, cerrados, noEncontrados, reparados: reparaciones.length, taller };
+}
+
+function sinTildes(v: string) {
+  return v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+}
+
+// "% BATERIA" como número 0–100. Acepta 89, 0.89 (celda con formato %)
+// y "89%". null si está vacía o no se entiende.
+function porcentajeBateria(v: Celda): number | null {
+  if (typeof v === "number") return v <= 1 ? v * 100 : v;
+  const n = parseFloat(texto(v).replace("%", "").replace(",", "."));
+  if (isNaN(n)) return null;
+  return n <= 1 ? n * 100 : n;
+}
+
+// Al cerrar un equipo de LOTE con destino ENCAJE, en su fila de "2026":
+//   - FECHA DE CHEQUEO = hoy, CHEQUEO = técnico.
+//   - Batería según "% BATERIA":
+//       89% o menos -> FECHA CAMBIO BATERIA = hoy, BATERIA = técnico.
+//       90% o más   -> BATERIA = "PASA" (sin fecha).
+//       vacío       -> no se toca la batería (se avisa).
+async function anotarChequeosEnTaller(libro: string, equipos: { imei: string; tecnico: string }[]) {
+  const columnas = ["% BATERIA", "FECHA CAMBIO BATERIA", "BATERIA", "FECHA DE CHEQUEO", "CHEQUEO"];
+  const { indice, valores: leidos, filaPorImei } = await leerTallerPorImei(libro, columnas, ["% BATERIA"]);
+  const iFechaBat = indice["FECHA CAMBIO BATERIA"], iBateria = indice["BATERIA"];
+  const iFechaChq = indice["FECHA DE CHEQUEO"], iChequeo = indice["CHEQUEO"];
+  const usadas = [iFechaBat, iBateria, iFechaChq, iChequeo];
+  const colMin = Math.min(...usadas), ancho = Math.max(...usadas) - colMin + 1;
+
+  const hoy = Math.floor(ahoraSerial());
+  const cambios = new Map<number, Celda[]>();
+  const anotados: string[] = [];
+  const noEstan: string[] = [];
+  const sinPorcentaje: string[] = [];
+
+  for (const { imei, tecnico } of equipos) {
+    const r = filaPorImei.get(imei);
+    if (r === undefined) {
+      noEstan.push(imei);
+      continue;
+    }
+    const valores: Celda[] = new Array(ancho).fill(null);
+    valores[iFechaChq - colMin] = hoy;
+    valores[iChequeo - colMin] = tecnico;
+    const pct = porcentajeBateria(leidos["% BATERIA"][r]);
+    if (pct === null) sinPorcentaje.push(imei);
+    else if (pct >= 90) valores[iBateria - colMin] = "PASA";
+    else {
+      valores[iFechaBat - colMin] = hoy;
+      valores[iBateria - colMin] = tecnico;
+    }
+    cambios.set(r + 2, valores);
+    anotados.push(imei);
+  }
+
+  if (cambios.size) {
+    await escribirFilasSueltas(libro, HOJA_TALLER, cambios, colMin, ancho, {
+      [iFechaBat - colMin]: "dd/mm/yyyy",
+      [iFechaChq - colMin]: "dd/mm/yyyy",
+    });
+  }
+  return { anotados, noEstan, sinPorcentaje };
 }
 
 // Escribe filas que no están juntas (fila de Excel -> valores desde
@@ -786,25 +865,38 @@ async function registrarPulidos(c: any) {
   return conSesion((libro) => pulirEquipos(libro, imeis, pulidor));
 }
 
-async function pulirEquipos(libro: string, imeis: string[], pulidor: string) {
+// Pestaña "2026": ubica las columnas pedidas (obligatorias), lee las de
+// `leer` y arma IMEI -> fila (la más de abajo, la más reciente; busca en
+// "IMEI" e "IMEI 2"). Las filas de `filaPorImei` y de `valores` empiezan
+// en 0 = fila 2 del Excel.
+async function leerTallerPorImei(libro: string, columnas: string[], leer: string[]) {
   const hoja = HOJA_TALLER;
   const { ultimaFila, ultimaColumna } = await tamanoUsado(libro, hoja);
   const igualar = (v: Celda) => normalizarCabecera(v).replace(/\s+/g, " ");
   const cabecera = (await leerRango(libro, hoja, `A1:${letraColumna(ultimaColumna)}1`))[0].map(igualar);
-  const iPulidor = indiceObligatorio(cabecera, "PULIDOR", hoja);
-  const iFecha = indiceObligatorio(cabecera, "FECHA DE PULIDO", hoja);
+  const indice: Record<string, number> = {};
+  for (const n of columnas) indice[n] = indiceObligatorio(cabecera, n, hoja);
   const indicesImei = cabecera.map((n, i) => (n === "IMEI" || n === "IMEI 2" ? i : -1)).filter((i) => i !== -1);
   if (!indicesImei.length) throw new Error(`Falta la columna "IMEI" en la pestaña "${hoja}".`);
 
-  const [colPulidor, ...colsImei] = await leerColumnas(libro, hoja, [iPulidor, ...indicesImei], 2, ultimaFila);
-  // IMEI -> la fila más de abajo donde aparece (la más reciente).
+  const leidas = await leerColumnas(libro, hoja, [...leer.map((n) => indice[n]), ...indicesImei], 2, ultimaFila);
+  const valores: Record<string, Celda[]> = {};
+  leer.forEach((n, j) => (valores[n] = leidas[j]));
   const filaPorImei = new Map<string, number>();
-  colsImei.forEach((col) =>
+  leidas.slice(leer.length).forEach((col) =>
     col.forEach((v, r) => {
       const imei = texto(v);
       if (imei && (filaPorImei.get(imei) ?? -1) < r) filaPorImei.set(imei, r);
     })
   );
+  return { indice, valores, filaPorImei };
+}
+
+async function pulirEquipos(libro: string, imeis: string[], pulidor: string) {
+  const hoja = HOJA_TALLER;
+  const { indice, valores: leidos, filaPorImei } = await leerTallerPorImei(libro, ["PULIDOR", "FECHA DE PULIDO"], ["PULIDOR"]);
+  const iPulidor = indice["PULIDOR"], iFecha = indice["FECHA DE PULIDO"];
+  const colPulidor = leidos["PULIDOR"];
 
   const hoy = Math.floor(ahoraSerial());
   const colMin = Math.min(iPulidor, iFecha), ancho = Math.abs(iPulidor - iFecha) + 1;
