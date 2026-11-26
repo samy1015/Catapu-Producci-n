@@ -782,8 +782,8 @@ function porcentajeBateria(v: Celda): number | null {
 //       89% o menos -> FECHA CAMBIO BATERIA = hoy, BATERIA = técnico.
 //       90% o más   -> BATERIA = "PASA" (sin fecha).
 //       vacío       -> no se toca la batería (se avisa).
-// - Si trae mensaje (cualquier origen/destino): se SUMA al MENSAJE que ya
-//   tenga, sin pisarlo ("1" + "2" -> "1 - 2").
+// - Si trae mensaje (cualquier origen/destino): va en MENSAJE,
+//   reemplazando lo que hubiera.
 type EquipoTaller = { imei: string; tecnicoChequeo: string; mensaje: string };
 const COLUMNAS_CHEQUEO_TALLER = ["% BATERIA", "FECHA CAMBIO BATERIA", "BATERIA", "FECHA DE CHEQUEO", "CHEQUEO"];
 
@@ -791,7 +791,7 @@ async function anotarEnTaller(libro: string, equipos: EquipoTaller[]) {
   const hayChequeos = equipos.some((e) => e.tecnicoChequeo);
   const hayMensajes = equipos.some((e) => e.mensaje);
   const columnas = [...(hayChequeos ? COLUMNAS_CHEQUEO_TALLER : []), ...(hayMensajes ? ["MENSAJE"] : [])];
-  const leer = [...(hayChequeos ? ["% BATERIA"] : []), ...(hayMensajes ? ["MENSAJE"] : [])];
+  const leer = hayChequeos ? ["% BATERIA"] : [];
   const { indice, valores: leidos, filaPorImei } = await leerTallerPorImei(libro, columnas, leer);
 
   const usadas = columnas.filter((n) => n !== "% BATERIA").map((n) => indice[n]);
@@ -828,8 +828,7 @@ async function anotarEnTaller(libro: string, equipos: EquipoTaller[]) {
     }
 
     if (mensaje) {
-      const previo = texto(fila[indice["MENSAJE"] - colMin] ?? leidos["MENSAJE"][r]);
-      poner(fila, "MENSAJE", previo ? `${previo} - ${mensaje}` : mensaje);
+      poner(fila, "MENSAJE", mensaje);
       mensajes.push(imei);
     }
     cambios.set(r + 2, fila);
