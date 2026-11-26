@@ -135,6 +135,8 @@
                 aria-controls="prod-sub-resumen" data-subpestana="resumen">Resumen</button>
         <button type="button" class="subpestana" role="tab" aria-selected="false"
                 aria-controls="prod-sub-equipos" data-subpestana="equipos">Equipos por técnico</button>
+        <button type="button" class="subpestana" role="tab" aria-selected="false"
+                aria-controls="prod-sub-pulidos" data-subpestana="pulidos">Pulidos</button>
       </nav>
 
       <main>
@@ -292,6 +294,37 @@
         </section>
 
         </div><!-- /prod-sub-equipos -->
+
+        <div class="subpanel" id="prod-sub-pulidos" role="tabpanel" hidden>
+          <section class="panel panel-wide">
+            <h2 class="panel-title">Registrar pulidos (escaneo)</h2>
+
+            <div class="controls">
+              <label class="control">
+                <span class="control-label">Pulidor</span>
+                <select id="pulido-pulidor">
+                  <option value="">Elige quién pulió…</option>
+                  <option value="JUANPABLO A.">JUANPABLO A.</option>
+                  <option value="CHRISTIAN G.">CHRISTIAN G.</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="control">
+              <span class="control-label">Escanear IMEI</span>
+              <input type="text" id="pulido-imei-input" inputmode="numeric" autocomplete="off"
+                     placeholder="Escanea o escribe un IMEI y presiona Enter, o pega una lista de IMEI" />
+            </label>
+
+            <div class="tk-fotos-seleccionadas" id="pulido-lista" hidden></div>
+
+            <div class="controls">
+              <button type="button" class="btn-refresh" id="pulido-btn-aceptar">Aceptar</button>
+              <button type="button" class="btn-refresh" id="pulido-btn-limpiar">Limpiar</button>
+              <span class="status-line" id="pulido-status"></span>
+            </div>
+          </section>
+        </div><!-- /prod-sub-pulidos -->
 
       </main>
 

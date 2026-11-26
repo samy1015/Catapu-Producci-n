@@ -1559,6 +1559,7 @@ function mostrarSubpestanaProduccion(nombre) {
   });
   document.getElementById("prod-sub-resumen").hidden = nombre !== "resumen";
   document.getElementById("prod-sub-equipos").hidden = nombre !== "equipos";
+  document.getElementById("prod-sub-pulidos").hidden = nombre !== "pulidos";
   document.querySelectorAll("#vista-produccion .solo-resumen").forEach((control) => {
     control.hidden = nombre !== "resumen";
   });
@@ -1577,7 +1578,8 @@ document.querySelectorAll(".subpestana").forEach((boton) => {
 });
 
 try {
-  if (localStorage.getItem(CLAVE_SUBPESTANA) === "equipos") mostrarSubpestanaProduccion("equipos");
+  const guardada = localStorage.getItem(CLAVE_SUBPESTANA);
+  if (guardada === "equipos" || guardada === "pulidos") mostrarSubpestanaProduccion(guardada);
 } catch (error) {
   // ídem: se queda en "Resumen"
 }
@@ -1791,3 +1793,113 @@ window.iniciarApp = function () {
   mostrarVista(vistaDesdeHash());
   Object.values(cargadoresDeVista).forEach((cargar) => cargar());
 };
+
+// ============================================================
+// 11. PULIDOS (subpestaña de Producción)
+// ============================================================
+// Se escanean varios IMEI, se elige quién los pulió y al "Aceptar" la
+// función anota en la pestaña "2026" PULIDOR (nombre) y FECHA DE PULIDO
+// (hoy) en la fila de cada IMEI. Si un IMEI ya tenía pulidor, no se pisa.
+const pulido = {
+  pulidor: document.getElementById("pulido-pulidor"),
+  input: document.getElementById("pulido-imei-input"),
+  lista: document.getElementById("pulido-lista"),
+  aceptar: document.getElementById("pulido-btn-aceptar"),
+  limpiar: document.getElementById("pulido-btn-limpiar"),
+  status: document.getElementById("pulido-status"),
+};
+let pulidoImeis = [];
+
+function avisoPulido(texto, esError = false) {
+  pulido.status.textContent = texto;
+  pulido.status.classList.toggle("is-error", esError);
+}
+
+function renderizarListaPulido() {
+  pulido.lista.hidden = pulidoImeis.length === 0;
+  pulido.lista.innerHTML = pulidoImeis
+    .map((imei, indice) => {
+      // Modelo al lado del IMEI si ya está en lo cargado (ayuda a detectar un error de escaneo).
+      const datos = mapaImeiTaller.get(imei);
+      const detalle = datos ? `${datos.modelo} ${datos.capacidad}`.trim() : "no está en 2025/2026";
+      return `
+      <div class="tk-foto-seleccionada">
+        <span class="tk-foto-seleccionada-nombre">${escaparHtml(imei)} · ${escaparHtml(detalle)}</span>
+        <button type="button" class="tk-foto-quitar" data-indice="${indice}" aria-label="Quitar ${escaparHtml(imei)}">✕</button>
+      </div>`;
+    })
+    .join("");
+}
+
+// Acepta un IMEI o una lista pegada (separada por saltos de línea, espacios, comas…).
+function agregarImeisPulido(texto) {
+  const candidatos = String(texto || "").split(/[\s,;]+/).map((v) => v.replace(/\D/g, "")).filter(Boolean);
+  const cortos = candidatos.filter((v) => v.length < MIN_DIGITOS_IMEI_ESCANEO);
+  const repetidos = [];
+  candidatos
+    .filter((v) => v.length >= MIN_DIGITOS_IMEI_ESCANEO)
+    .forEach((imei) => {
+      if (pulidoImeis.includes(imei)) repetidos.push(imei);
+      else pulidoImeis.push(imei);
+    });
+  renderizarListaPulido();
+
+  const avisos = [];
+  if (repetidos.length) avisos.push(`Ya estaba en la lista: ${repetidos.join(", ")}.`);
+  if (cortos.length) avisos.push(`IMEI muy corto (mín. ${MIN_DIGITOS_IMEI_ESCANEO} dígitos): ${cortos.join(", ")}.`);
+  avisoPulido(avisos.join(" "), avisos.length > 0);
+}
+
+async function aceptarPulidos() {
+  if (pulidoImeis.length === 0) return avisoPulido("Escanea al menos un IMEI antes de aceptar.", true);
+  if (!pulido.pulidor.value) return avisoPulido("Elige quién pulió antes de aceptar.", true);
+
+  pulido.aceptar.disabled = true;
+  avisoPulido("Guardando…");
+  try {
+    const datos = await llamarExcel({}, { accion: "registrarPulidos", pulidor: pulido.pulidor.value, imeis: pulidoImeis });
+    const partes = [`${datos.pulidos.length} pulido(s) anotado(s).`];
+    if (datos.yaPulidos.length) {
+      partes.push(`Ya tenían pulidor (no se cambiaron): ${datos.yaPulidos.map((p) => `${p.imei} (${p.pulidor})`).join(", ")}.`);
+    }
+    if (datos.noEncontrados.length) partes.push(`No están en la hoja 2026: ${datos.noEncontrados.join(", ")}.`);
+    avisoPulido(partes.join(" "), datos.yaPulidos.length > 0 || datos.noEncontrados.length > 0);
+    // Se quitan de la lista solo los que se anotaron; los otros quedan para revisarlos.
+    pulidoImeis = pulidoImeis.filter((imei) => !datos.pulidos.includes(imei));
+    renderizarListaPulido();
+  } catch (error) {
+    console.error(error);
+    avisoPulido("No se pudo guardar. (" + error.message + ")", true);
+  } finally {
+    pulido.aceptar.disabled = false;
+    pulido.input.focus();
+  }
+}
+
+pulido.input.addEventListener("keydown", (evento) => {
+  if (evento.key !== "Enter") return;
+  evento.preventDefault();
+  agregarImeisPulido(pulido.input.value);
+  pulido.input.value = "";
+  pulido.input.focus(); // para seguir escaneando sin tocar el mouse
+});
+pulido.input.addEventListener("paste", (evento) => {
+  const texto = (evento.clipboardData || window.clipboardData).getData("text");
+  if (!/[\s,;]/.test(texto.trim())) return; // un solo IMEI: pegado normal, luego Enter
+  evento.preventDefault();
+  agregarImeisPulido(texto);
+  pulido.input.value = "";
+});
+pulido.lista.addEventListener("click", (evento) => {
+  const quitar = evento.target.closest(".tk-foto-quitar");
+  if (!quitar) return;
+  pulidoImeis.splice(Number(quitar.dataset.indice), 1);
+  renderizarListaPulido();
+});
+pulido.aceptar.addEventListener("click", aceptarPulidos);
+pulido.limpiar.addEventListener("click", () => {
+  pulidoImeis = [];
+  renderizarListaPulido();
+  avisoPulido("");
+  pulido.input.focus();
+});

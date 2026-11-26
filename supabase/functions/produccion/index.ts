@@ -19,6 +19,7 @@
 //   ?entregas=1              -> pestaña "EQUI. POR TEC."
 //   ?accion=reparaciones[&desde=AAAA-MM-DD][&hasta=AAAA-MM-DD] -> pestaña "REPARADOS"
 //   POST {accion:"registrarEntregas", modo, imeis, tecnico?, categoria?}
+//   POST {accion:"registrarPulidos", pulidor, imeis}  -> pestaña "2026": PULIDOR + FECHA DE PULIDO
 // ============================================================
 
 // El Deno global (el que da Supabase), con otro nombre para que ni VS
@@ -85,6 +86,7 @@ entorno.serve(async (req: Request) => {
     let resultado: unknown;
     if (accion === "diagnostico") resultado = await diagnostico();
     else if (accion === "registrarEntregas") resultado = await registrarEntregas(cuerpo);
+    else if (accion === "registrarPulidos") resultado = await registrarPulidos(cuerpo);
     else if (accion === "reparaciones") resultado = await reparaciones(fechaValida(p.desde), fechaValida(p.hasta));
     else if (p.imei) resultado = await buscarPorImei(p.imei);
     else if (p.entregas) resultado = await entregas();
@@ -728,10 +730,26 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
     if (item.reparacion) reparaciones.push({ item, tecnico: item.tecnicoReparacion || texto(colTecnico[r]) });
   }
 
-  // En vez de escribir fila por fila, se agrupan las filas cercanas en
-  // bloques y cada bloque va en una sola escritura: las filas del medio
-  // que no se tocan van en null (Graph las deja como están). Las columnas
-  // FECHA C./HORA C. del bloque reciben su formato (es el de toda la columna).
+  // FECHA C./HORA C. reciben su formato (es el de toda la columna).
+  await escribirFilasSueltas(libro, HOJA_ENTREGAS, cambios, colMin, ancho, {
+    [iFechaC - colMin]: "dd/mm/yyyy",
+    [iHoraC - colMin]: "HH:mm",
+  });
+
+  if (reparaciones.length) await anotarReparaciones(libro, reparaciones);
+  return { ok: true, cerrados, noEncontrados, reparados: reparaciones.length };
+}
+
+// Escribe filas que no están juntas (fila de Excel -> valores desde
+// colMin, `ancho` columnas). En vez de una escritura por fila, agrupa
+// las filas cercanas en bloques y cada bloque va en una sola escritura:
+// las filas del medio que no se tocan van en null (Graph las deja como
+// están). `formatos` ({posición en el bloque: formato}) se aplica a esas
+// columnas en todo el bloque (es el formato de toda la columna).
+async function escribirFilasSueltas(
+  libro: string, hoja: string, cambios: Map<number, Celda[]>, colMin: number, ancho: number,
+  formatos: Record<number, string>,
+) {
   const filas = [...cambios.keys()].sort((a, b) => a - b);
   const bloques: number[][] = [];
   for (const f of filas) {
@@ -742,23 +760,80 @@ async function cerrarEquipos(libro: string, items: ItemCierre[]) {
   for (const bloque of bloques) {
     const desde = bloque[0], hasta = bloque[bloque.length - 1];
     const valores: Celda[][] = [];
-    const formatos: (string | null)[][] = [];
+    const formatosBloque: (string | null)[][] = [];
     for (let f = desde; f <= hasta; f++) {
       valores.push(cambios.get(f) || new Array(ancho).fill(null));
       const formato: (string | null)[] = new Array(ancho).fill(null);
-      formato[iFechaC - colMin] = "dd/mm/yyyy";
-      formato[iHoraC - colMin] = "HH:mm";
-      formatos.push(formato);
+      for (const [j, fmt] of Object.entries(formatos)) formato[Number(j)] = fmt;
+      formatosBloque.push(formato);
     }
     // Una escritura a la vez: Excel en línea rechaza escrituras simultáneas al mismo archivo.
     await escribirRango(
-      libro, HOJA_ENTREGAS, `${letraColumna(colMin + 1)}${desde}:${letraColumna(colMax + 1)}${hasta}`,
-      valores, formatos,
+      libro, hoja, `${letraColumna(colMin + 1)}${desde}:${letraColumna(colMin + ancho)}${hasta}`,
+      valores, formatosBloque,
     );
   }
+}
 
-  if (reparaciones.length) await anotarReparaciones(libro, reparaciones);
-  return { ok: true, cerrados, noEncontrados, reparados: reparaciones.length };
+// ------------------------------------------------------------
+// Pulidos (pestaña "2026": PULIDOR + FECHA DE PULIDO)
+// ------------------------------------------------------------
+async function registrarPulidos(c: any) {
+  const pulidor = String(c.pulidor ?? "").trim().toUpperCase();
+  if (!pulidor) throw new Error("Falta elegir quién pulió.");
+  const imeis = [...new Set((Array.isArray(c.imeis) ? c.imeis : []).map((v: unknown) => String(v ?? "").trim()).filter(Boolean))] as string[];
+  if (!imeis.length) throw new Error("No hay ningún IMEI para procesar.");
+  return conSesion((libro) => pulirEquipos(libro, imeis, pulidor));
+}
+
+async function pulirEquipos(libro: string, imeis: string[], pulidor: string) {
+  const hoja = HOJA_TALLER;
+  const { ultimaFila, ultimaColumna } = await tamanoUsado(libro, hoja);
+  const igualar = (v: Celda) => normalizarCabecera(v).replace(/\s+/g, " ");
+  const cabecera = (await leerRango(libro, hoja, `A1:${letraColumna(ultimaColumna)}1`))[0].map(igualar);
+  const iPulidor = indiceObligatorio(cabecera, "PULIDOR", hoja);
+  const iFecha = indiceObligatorio(cabecera, "FECHA DE PULIDO", hoja);
+  const indicesImei = cabecera.map((n, i) => (n === "IMEI" || n === "IMEI 2" ? i : -1)).filter((i) => i !== -1);
+  if (!indicesImei.length) throw new Error(`Falta la columna "IMEI" en la pestaña "${hoja}".`);
+
+  const [colPulidor, ...colsImei] = await leerColumnas(libro, hoja, [iPulidor, ...indicesImei], 2, ultimaFila);
+  // IMEI -> la fila más de abajo donde aparece (la más reciente).
+  const filaPorImei = new Map<string, number>();
+  colsImei.forEach((col) =>
+    col.forEach((v, r) => {
+      const imei = texto(v);
+      if (imei && (filaPorImei.get(imei) ?? -1) < r) filaPorImei.set(imei, r);
+    })
+  );
+
+  const hoy = Math.floor(ahoraSerial());
+  const colMin = Math.min(iPulidor, iFecha), ancho = Math.abs(iPulidor - iFecha) + 1;
+  const cambios = new Map<number, Celda[]>();
+  const pulidos: string[] = [];
+  const noEncontrados: string[] = [];
+  const yaPulidos: { imei: string; pulidor: string }[] = [];
+
+  for (const imei of imeis) {
+    const r = filaPorImei.get(imei);
+    if (r === undefined) {
+      noEncontrados.push(imei);
+      continue;
+    }
+    // Si ya tiene pulidor, no se pisa: se avisa.
+    const anterior = texto(colPulidor[r]);
+    if (anterior) {
+      yaPulidos.push({ imei, pulidor: anterior });
+      continue;
+    }
+    const valores: Celda[] = new Array(ancho).fill(null);
+    valores[iPulidor - colMin] = pulidor;
+    valores[iFecha - colMin] = hoy;
+    cambios.set(r + 2, valores);
+    pulidos.push(imei);
+  }
+
+  if (cambios.size) await escribirFilasSueltas(libro, hoja, cambios, colMin, ancho, { [iFecha - colMin]: "dd/mm/yyyy" });
+  return { ok: true, pulidos, noEncontrados, yaPulidos };
 }
 
 // ------------------------------------------------------------
