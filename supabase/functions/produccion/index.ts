@@ -2,13 +2,21 @@
 // Edge Function "produccion" (dashboard Catapu)
 // ------------------------------------------------------------
 // Reemplaza a los antiguos Apps Script produccion.gs y reparaciones.gs (borrados; siguen en el historial de git):
-// lee y escribe PRODUCCION.xlsx (OneDrive de serviciotecnico@catapu.com)
-// con Microsoft Graph, usando la app "TallerDashboard" de Entra.
+// lee y escribe PRODUCCION.xlsx en OneDrive con Microsoft Graph.
 //
-// Secretos (Supabase > Edge Functions > Secrets):
-//   MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET   (obligatorios)
-//   MS_USUARIO   (opcional, por defecto serviciotecnico@catapu.com)
+// Dos formas de conectarse (Supabase > Edge Functions > Secrets):
+//   a) OneDrive PERSONAL (Outlook/Hotmail), entrando con tu propia cuenta:
+//        MS_CLIENT_ID, MS_REFRESH_TOKEN   (el token se saca una vez con
+//        herramientas/token-onedrive.mjs; si este lo indica, también
+//        MS_AUTORIDAD). MS_CLIENT_SECRET no hace falta.
+//   b) OneDrive de EMPRESA, como aplicación de Entra (sin usuario):
+//        MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, MS_USUARIO
+//   Si existe MS_REFRESH_TOKEN se usa (a); si no, (b).
 //   MS_ARCHIVO   (opcional, por defecto PRODUCCION.xlsx, ruta desde la raíz)
+//
+// En modo (a) Microsoft renueva el token en cada uso; el último se guarda
+// en la tabla ms_token (ver supabase/ms_token.sql) para que nunca caduque
+// mientras el dashboard se siga usando.
 //
 // Solo responde a usuarios logueados en el dashboard (JWT de Supabase).
 //
@@ -35,7 +43,13 @@ export {};
 const TENANT = entorno.env.get("MS_TENANT_ID") ?? "";
 const CLIENT_ID = entorno.env.get("MS_CLIENT_ID") ?? "";
 const CLIENT_SECRET = entorno.env.get("MS_CLIENT_SECRET") ?? "";
-const USUARIO = entorno.env.get("MS_USUARIO") ?? "serviciotecnico@catapu.com";
+const REFRESH_TOKEN = entorno.env.get("MS_REFRESH_TOKEN") ?? "";
+const MODO_PERSONAL = REFRESH_TOKEN !== "";
+const USUARIO = MODO_PERSONAL ? "tu cuenta" : entorno.env.get("MS_USUARIO") ?? "serviciotecnico@catapu.com";
+// Dónde se renueva el token personal (lo indica herramientas/token-onedrive.mjs).
+const AUTORIDAD = entorno.env.get("MS_AUTORIDAD") || "consumers";
+const SUPABASE_URL = entorno.env.get("SUPABASE_URL") ?? "";
+const SUPABASE_SERVICE_KEY = entorno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const ARCHIVO = entorno.env.get("MS_ARCHIVO") ?? "PRODUCCION.xlsx";
 
 const HOJA_TALLER = "2026";
@@ -132,6 +146,7 @@ let idArchivoCache = "";
 
 async function tokenGraph() {
   if (tokenCache && tokenCache.vence > Date.now() + 60_000) return tokenCache.valor;
+  if (MODO_PERSONAL) return tokenPersonal();
   if (!TENANT || !CLIENT_ID || !CLIENT_SECRET) {
     throw new Error("Faltan los secretos MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET en Supabase.");
   }
@@ -149,6 +164,62 @@ async function tokenGraph() {
   if (!resp.ok) {
     throw new Error("Microsoft rechazó las credenciales: " + (datos.error_description || datos.error || resp.status));
   }
+  tokenCache = { valor: datos.access_token, vence: Date.now() + datos.expires_in * 1000 };
+  return tokenCache.valor;
+}
+
+// ---- Modo OneDrive personal (token de usuario renovable) ----
+// La tabla ms_token guarda el refresh token más reciente; el secreto
+// MS_REFRESH_TOKEN es solo el punto de partida.
+async function tablaToken(metodo: "GET" | "POST", valor?: string): Promise<string> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return "";
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/ms_token${metodo === "GET" ? "?id=eq.1&select=refresh_token" : ""}`, {
+      method: metodo,
+      headers: {
+        apikey: SUPABASE_SERVICE_KEY,
+        Authorization: "Bearer " + SUPABASE_SERVICE_KEY,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates",
+      },
+      body: metodo === "POST" ? JSON.stringify({ id: 1, refresh_token: valor, actualizado: new Date().toISOString() }) : undefined,
+    });
+    if (!resp.ok) return "";
+    return metodo === "GET" ? (await resp.json())[0]?.refresh_token || "" : "";
+  } catch {
+    return "";
+  }
+}
+
+async function pedirTokenPersonal(refresh: string) {
+  const cuerpo: Record<string, string> = {
+    client_id: CLIENT_ID,
+    grant_type: "refresh_token",
+    refresh_token: refresh,
+    scope: "Files.ReadWrite offline_access",
+  };
+  if (CLIENT_SECRET) cuerpo.client_secret = CLIENT_SECRET;
+  const resp = await fetch(`https://login.microsoftonline.com/${AUTORIDAD}/oauth2/v2.0/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(cuerpo),
+  });
+  return { resp, datos: await resp.json() };
+}
+
+async function tokenPersonal() {
+  if (!CLIENT_ID) throw new Error("Falta el secreto MS_CLIENT_ID en Supabase.");
+  const guardado = await tablaToken("GET");
+  let { resp, datos } = await pedirTokenPersonal(guardado || REFRESH_TOKEN);
+  // Si el guardado ya no sirve (p. ej. se generó un MS_REFRESH_TOKEN nuevo), prueba con el secreto.
+  if (!resp.ok && guardado && guardado !== REFRESH_TOKEN) ({ resp, datos } = await pedirTokenPersonal(REFRESH_TOKEN));
+  if (!resp.ok) {
+    throw new Error(
+      "Microsoft rechazó el inicio de sesión (vuelve a generar MS_REFRESH_TOKEN con herramientas/token-onedrive.mjs): " +
+        (datos.error_description || datos.error || resp.status)
+    );
+  }
+  if (datos.refresh_token) await tablaToken("POST", datos.refresh_token);
   tokenCache = { valor: datos.access_token, vence: Date.now() + datos.expires_in * 1000 };
   return tokenCache.valor;
 }
@@ -191,8 +262,11 @@ async function graph(ruta: string, opciones: { method?: string; body?: unknown }
   }
 }
 
+// OneDrive personal: el del usuario que inició sesión (/me).
+const DRIVE = MODO_PERSONAL ? "/me/drive" : `/users/${encodeURIComponent(USUARIO)}/drive`;
+
 async function rutaLibro() {
-  const drive = `/users/${encodeURIComponent(USUARIO)}/drive`;
+  const drive = DRIVE;
   if (!idArchivoCache) idArchivoCache = (await ubicarArchivo(drive)).id;
   return `${drive}/items/${idArchivoCache}/workbook`;
 }
@@ -204,6 +278,8 @@ async function rutaLibro() {
 // Si no se puede crear, sigue sin ella.
 async function conSesion<T>(fn: (libro: string) => Promise<T>): Promise<T> {
   const libro = await rutaLibro();
+  // Microsoft no ofrece sesiones de Excel en cuentas personales.
+  if (MODO_PERSONAL) return fn(libro);
   let id = "";
   try {
     id = (await graph(`${libro}/createSession`, { method: "POST", body: { persistChanges: true } })).id || "";
@@ -238,8 +314,8 @@ async function ubicarArchivo(drive: string): Promise<{ id: string; ruta: string 
     if (!String((err as Error).message).includes("(404)")) throw err;
   }
 
-  // El buscador de OneDrive (search) no funciona con este tipo de acceso
-  // (app sin usuario), así que se recorren las carpetas, nivel por nivel.
+  // Se recorren las carpetas, nivel por nivel (el buscador de OneDrive no
+  // funciona con el acceso de aplicación sin usuario).
   const nombre = ARCHIVO.split("/").pop()!.toLowerCase();
   let nivel: { id: string; ruta: string }[] = [{ id: "root", ruta: "" }];
   for (let profundidad = 0; profundidad < 4 && nivel.length; profundidad++) {
@@ -402,11 +478,12 @@ async function diagnostico() {
 
   await probar("1_permisos_del_token", async () => {
     const t = await tokenGraph();
+    if (MODO_PERSONAL) return "OK (cuenta personal)";
     const datos = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
     return { roles: datos.roles || [], app: datos.app_displayname };
   });
 
-  const usuario = `/users/${encodeURIComponent(USUARIO)}`;
+  const usuario = DRIVE.replace(/\/drive$/, "");
   await probar("2_onedrive", async () => {
     const d = await graph(`${usuario}/drive?$select=id,driveType,webUrl`);
     return { tipo: d.driveType, url: d.webUrl };

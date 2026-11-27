@@ -1838,7 +1838,8 @@ main {
    eje a dejar de ser "visible" (mismo quirk que #tk-detalle-contenedor
    más abajo) — sin este override, el panel recorta el desplegable de
    "Mensaje" apenas se abre cerca del borde inferior. */
-#panel-escaneo {
+#panel-escaneo,
+#panel-entregas { /* ídem con el desplegable "Modelo" de Equipos por técnico */
   overflow-x: visible;
 }
 
