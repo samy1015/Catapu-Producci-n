@@ -21,7 +21,7 @@ const historialImeiCache = new Map();
 // los datos a menos que el usuario le dé "Actualizar".
 let registrosOriginales = [];
 let registrosEntregas = []; // pestaña "EQUI. POR TEC." (ver cargarEntregas)
-let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado} (de las pestañas "2025"/"2026"), para enriquecer "Equipos por técnico"
+let mapaImeiTaller = new Map(); // IMEI -> {modelo, capacidad, color, grado, lote} (de las pestañas "2025"/"2026"), para enriquecer "Equipos por técnico"
 // "abierto" (por defecto, al entrar): solo ABIERTO, ignorando el rango
 // de fechas. "mostrar": todo (abierto + cerrado), respetando el rango.
 let modoEntregas = "abierto";
@@ -79,6 +79,13 @@ const el = {
   entregasTotalAbiertos: document.getElementById("entregas-total-abiertos"),
   entregasTotalCerrados: document.getElementById("entregas-total-cerrados"),
   entregasTotalGeneral: document.getElementById("entregas-total-general"),
+  filtroModelo: document.getElementById("filtro-modelo"),
+  filtroModeloBoton: document.getElementById("filtro-modelo-boton"),
+  filtroModeloTexto: document.getElementById("filtro-modelo-texto"),
+  filtroModeloPanel: document.getElementById("filtro-modelo-panel"),
+  filtroModeloBuscar: document.getElementById("filtro-modelo-buscar"),
+  filtroModeloTodos: document.getElementById("filtro-modelo-todos"),
+  filtroModeloLista: document.getElementById("filtro-modelo-lista"),
 
   escaneoModoAbrir: document.getElementById("escaneo-modo-abrir"),
   escaneoModoCerrar: document.getElementById("escaneo-modo-cerrar"),
@@ -270,7 +277,7 @@ async function cargarDatos() {
   }
 }
 
-// Pestaña APARTE ("EQUI. POR TEC."), independiente de "2026": se
+// Pestaña APARTE ("EQUI. POR TEC."), independiente de "2025"/"2026": se
 // carga y se avisa de errores por su cuenta, para que un problema acá
 // no tumbe el resto del panel (mismo criterio que otras secciones
 // secundarias del dashboard).
@@ -415,9 +422,10 @@ function normalizarNombre(valor) {
   return String(valor || "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
-// IMEI -> {modelo, capacidad, color, grado}, para que "Equipos por
-// técnico" (otra hoja, que solo trae IMEI/estado/categoría) pueda
-// mostrar también el modelo/color/etc. que sí vive en la pestaña "2026".
+// IMEI -> {modelo, capacidad, color, grado, lote}, para que "Equipos por
+// técnico" y "Equipos encajados" (pestaña EQUI. POR TEC., que solo trae
+// IMEI/técnico/estado) puedan mostrar el modelo/color/etc. que sí vive
+// en las pestañas "2025"/"2026".
 function construirMapaImei(registros) {
   const mapa = new Map();
   registros.forEach((r) => {
@@ -597,7 +605,7 @@ function contarModelos(registros) {
     .sort((a, b) => b.cantidad - a.cantidad);
 }
 
-// Agrupa los equipos de la hoja "Equipos por tecnico" por técnico,
+// Agrupa los equipos de la pestaña "EQUI. POR TEC." por técnico,
 // contando cuántos están ABIERTO (todavía en su mesa) y cuántos
 // CERRADO (ya no los tiene), y guardando la lista completa para el
 // detalle desplegable.
@@ -612,7 +620,7 @@ function agruparEntregasPorTecnico(registros) {
     if (r.estado === "ABIERTO") grupo.abiertos++;
     else if (r.estado === "CERRADO") grupo.cerrados++;
     // Datos del equipo (modelo/capacidad/color/grado) no viven en esta
-    // pestaña — se cruzan por IMEI con lo que ya trajo "2026".
+    // pestaña — se cruzan por IMEI con lo que ya trajo "2025"/"2026".
     const datosTaller = mapaImeiTaller.get(r.imei);
     grupo.equipos.push({ ...r, ...(datosTaller || {}) });
   });
@@ -772,13 +780,14 @@ function describirFiltros(desde, hasta, lotes) {
 // "Equipos por técnico" es una pestaña aparte ("EQUI. POR TEC.",
 // con otra columna de fecha) — tiene su PROPIO filtro de
 // fechas (#entregas-fecha-desde/hasta), independiente del Desde/Hasta
-// general de arriba, que es solo para la pestaña "2026".
+// general de arriba, que es solo para el Resumen.
 //
 // Dos modos (botones "Mostrar"/"Abierto", ver sección 9):
 //   "abierto" (por defecto, al entrar): solo los ABIERTO, SIN
 //             importar el rango de fechas — para ver de un vistazo
 //             quién tiene equipos pendientes ahora mismo.
-//   "mostrar": todo (abiertos + cerrados), respetando el rango Desde/Hasta.
+//   "mostrar": todo (abiertos + cerrados) asignado en el rango Desde/Hasta
+//             (columna FECHA). Se activa solo al cambiar una fecha.
 function renderizarEntregasFiltradas() {
   const filtrados =
     modoEntregas === "abierto"
@@ -788,7 +797,68 @@ function renderizarEntregasFiltradas() {
           const hasta = el.entregasFechaHasta.value || null;
           return fechaDentroDeRango(r.fecha, desde, hasta);
         });
-  renderizarTablaEntregas(agruparEntregasPorTecnico(filtrados));
+  poblarFiltroModelos(filtrados);
+  const porModelo =
+    modelosSeleccionados.size === 0
+      ? filtrados
+      : filtrados.filter((r) => modelosSeleccionados.has(modeloDeEntrega(r)));
+  renderizarTablaEntregas(agruparEntregasPorTecnico(porModelo));
+}
+
+// ---- Filtro de modelos (selección múltiple) de "Equipos por técnico" ----
+// El modelo no vive en "EQUI. POR TEC.": se cruza por IMEI con 2025/2026.
+// Ninguno marcado = todos los modelos.
+const SIN_MODELO = "(Sin modelo)";
+const modelosSeleccionados = new Set();
+
+function modeloDeEntrega(r) {
+  return (mapaImeiTaller.get(r.imei) || {}).modelo || SIN_MODELO;
+}
+
+// Las opciones son los modelos que hay en la vista actual (Abierto o el
+// rango de fechas). Los marcados se mantienen aunque no aparezcan ahora,
+// para no perder la selección al cambiar de fecha.
+function poblarFiltroModelos(registros) {
+  const modelos = [...new Set([...registros.map(modeloDeEntrega), ...modelosSeleccionados])].sort((a, b) =>
+    a === SIN_MODELO ? 1 : b === SIN_MODELO ? -1 : a.localeCompare(b, "es", { numeric: true })
+  );
+  const buscado = el.filtroModeloBuscar.value;
+  el.filtroModeloLista.innerHTML = modelos
+    .map(
+      (modelo) => `
+      <label class="multiselect-opcion" data-modelo="${escaparHtml(modelo)}">
+        <input type="checkbox" value="${escaparHtml(modelo)}" ${modelosSeleccionados.has(modelo) ? "checked" : ""} />
+        <span>${escaparHtml(modelo)}</span>
+      </label>`
+    )
+    .join("");
+  filtrarListaModelos(buscado);
+  actualizarTextoModelos();
+}
+
+function actualizarTextoModelos() {
+  const elegidos = [...modelosSeleccionados].sort();
+  el.filtroModeloTexto.textContent =
+    elegidos.length === 0 ? "Todos" : elegidos.length === 1 ? elegidos[0] : `${elegidos.length} modelos`;
+  el.filtroModeloBoton.title = elegidos.length > 1 ? elegidos.join(", ") : "";
+  el.filtroModeloTodos.disabled = elegidos.length === 0;
+}
+
+function abrirPanelModelos(abrir) {
+  el.filtroModeloPanel.hidden = !abrir;
+  el.filtroModeloBoton.setAttribute("aria-expanded", String(abrir));
+  if (abrir) {
+    el.filtroModeloBuscar.value = "";
+    filtrarListaModelos("");
+    el.filtroModeloBuscar.focus();
+  }
+}
+
+function filtrarListaModelos(texto) {
+  const buscado = texto.trim().toUpperCase();
+  el.filtroModeloLista.querySelectorAll(".multiselect-opcion").forEach((opcion) => {
+    opcion.hidden = buscado !== "" && !opcion.dataset.modelo.toUpperCase().includes(buscado);
+  });
 }
 
 function actualizarBotonesModoEntregas() {
@@ -976,7 +1046,8 @@ function renderizarTablaEntregas(filas) {
 
 // ============================================================
 // 6b. ESCANEO DE IMEI ("Registrar equipos") — abrir/cerrar equipos en
-// "Equipos por tecnico" directo desde el dashboard. Reutiliza el
+// "EQUI. POR TEC." directo desde el dashboard (al cerrar, la función
+// también anota chequeo/batería/mensaje en "2026"). Reutiliza el
 // mismo look de ".tk-fotos-seleccionadas" (lista con "✕" para quitar)
 // que ya usa Tickets para fotos elegidas.
 // ============================================================
@@ -1706,9 +1777,31 @@ el.filtroLoteTodos.addEventListener("click", () => {
   actualizarTextoLotes();
   aplicarFiltrosYRenderizar();
 });
-// Se cierra al hacer clic fuera o con Escape.
+// Filtro de modelos de "Equipos por técnico" (selección múltiple).
+el.filtroModeloBoton.addEventListener("click", () => abrirPanelModelos(el.filtroModeloPanel.hidden));
+el.filtroModeloBuscar.addEventListener("input", () => filtrarListaModelos(el.filtroModeloBuscar.value));
+el.filtroModeloLista.addEventListener("change", (evento) => {
+  const casilla = evento.target;
+  if (casilla.checked) modelosSeleccionados.add(casilla.value);
+  else modelosSeleccionados.delete(casilla.value);
+  renderizarEntregasFiltradas();
+});
+el.filtroModeloTodos.addEventListener("click", () => {
+  modelosSeleccionados.clear();
+  renderizarEntregasFiltradas();
+});
+el.filtroModelo.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && !el.filtroModeloPanel.hidden) {
+    abrirPanelModelos(false);
+    el.filtroModeloBoton.focus();
+  }
+});
+// Los paneles se cierran al hacer clic fuera o con Escape.
 document.addEventListener("click", (evento) => {
   if (!el.filtroLotePanel.hidden && !el.filtroLote.contains(evento.target)) abrirPanelLotes(false);
+  // composedPath: la lista se redibuja al marcar, y el elemento clicado
+  // puede quedar fuera del DOM.
+  if (!el.filtroModeloPanel.hidden && !evento.composedPath().includes(el.filtroModelo)) abrirPanelModelos(false);
 });
 el.filtroLote.addEventListener("keydown", (evento) => {
   if (evento.key === "Escape" && !el.filtroLotePanel.hidden) {
@@ -1837,10 +1930,13 @@ function renderizarListaPulido() {
     .map((imei, indice) => {
       // Modelo al lado del IMEI si ya está en lo cargado (ayuda a detectar un error de escaneo).
       const datos = mapaImeiTaller.get(imei);
-      const detalle = datos ? `${datos.modelo} ${datos.capacidad}`.trim() : "no está en 2025/2026";
+      const detalle = datos
+        ? `${datos.modelo} ${datos.capacidad}`.trim()
+        : mapaImeiTaller.size ? "no está en 2025/2026" : "";
+      const texto = detalle ? `${imei} · ${detalle}` : imei;
       return `
       <div class="tk-foto-seleccionada">
-        <span class="tk-foto-seleccionada-nombre">${escaparHtml(imei)} · ${escaparHtml(detalle)}</span>
+        <span class="tk-foto-seleccionada-nombre">${escaparHtml(texto)}</span>
         <button type="button" class="tk-foto-quitar" data-indice="${indice}" aria-label="Quitar ${escaparHtml(imei)}">✕</button>
       </div>`;
     })

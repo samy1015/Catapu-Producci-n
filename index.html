@@ -269,6 +269,24 @@
           <div class="panel-title-fila">
             <h2 class="panel-title">Equipos por técnico</h2>
             <div class="controls controls--compactas">
+              <!-- Modelo: selección múltiple (ver poblarFiltroModelos en script.js).
+                   Ninguno marcado = todos los modelos. -->
+              <div class="control">
+                <span class="control-label" id="filtro-modelo-etiqueta">Modelo</span>
+                <div class="multiselect" id="filtro-modelo">
+                  <button type="button" class="multiselect-boton" id="filtro-modelo-boton"
+                          aria-haspopup="true" aria-expanded="false" aria-controls="filtro-modelo-panel"
+                          aria-labelledby="filtro-modelo-etiqueta filtro-modelo-texto">
+                    <span class="multiselect-texto" id="filtro-modelo-texto">Todos</span>
+                  </button>
+                  <div class="multiselect-panel" id="filtro-modelo-panel" hidden>
+                    <input type="search" class="multiselect-buscar" id="filtro-modelo-buscar"
+                           placeholder="Buscar modelo…" autocomplete="off" aria-label="Buscar modelo" />
+                    <button type="button" class="multiselect-todos" id="filtro-modelo-todos">Todos los modelos</button>
+                    <div class="multiselect-lista" id="filtro-modelo-lista" role="group" aria-label="Modelos"></div>
+                  </div>
+                </div>
+              </div>
               <label class="control">
                 <span class="control-label">Desde</span>
                 <input type="date" id="entregas-fecha-desde" />

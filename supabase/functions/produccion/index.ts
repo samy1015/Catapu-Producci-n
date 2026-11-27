@@ -18,7 +18,9 @@
 //   ?imei=XXXX               -> filas completas (pestañas "2026" y "2025") cuyo IMEI / imei 2 contiene XXXX
 //   ?entregas=1              -> pestaña "EQUI. POR TEC."
 //   ?accion=reparaciones[&desde=AAAA-MM-DD][&hasta=AAAA-MM-DD] -> pestaña "REPARADOS"
-//   POST {accion:"registrarEntregas", modo, imeis, tecnico?, categoria?}
+//   POST {accion:"registrarEntregas", modo:"abrir"|"cerrar", imeis, tecnico?, categoria?}
+//        -> "EQUI. POR TEC." (abrir/cerrar). Al cerrar, además: REPARADOS (si
+//           hubo reparación) y "2026" (chequeo/batería si es LOTE+ENCAJE; mensaje)
 //   POST {accion:"registrarPulidos", pulidor, imeis}  -> pestaña "2026": PULIDOR + FECHA DE PULIDO
 // ============================================================
 
